@@ -25,7 +25,7 @@ HW_CONFIGS = {
         "spidev_device_path": "/dev/spidev0.0",
         "gpiod_device_path": "/dev/gpiochip0",
         "dcx_pin_id": 18,
-        "rst_pin_id": 22,
+        "rst_pin_id": None,
         "spi_clock_hz": 42_000_000,
         "spi_data_chunk_size": 0,  # No chunking!
         "circuit_guide": CIRCUIT_GUIDE,
