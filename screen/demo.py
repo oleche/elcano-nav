@@ -1,32 +1,120 @@
+import sys
+sys.path.append("ili9341")
+
 import time
-import busio
-import digitalio
-from board import SCK, MOSI, MISO, CE0, D18
 
-from adafruit_rgb_display import color565
-import adafruit_rgb_display.ili9341 as ili9341
+from ili9341.ili9341_spidev import Ili9341Spidev
+import test_procedures as tp
 
 
-# Configuration for CS and DC pins:
-CS_PIN = CE0
-DC_PIN = D18
+CIRCUIT_GUIDE = """
+# ----------------------------------------------------------------,
+[RPi2B Compat. Host]   <---> [Display]
+==================================================================
+Pin-19/GPIO-10/MOSI    <---> MOSI (Main-Out-Sub-In)
+Pin-23/GPIO-11/SCLK    <---> SCLK (SPI-Clock)
+Pin-24/GPIO-8/SPI0-CE0 <---> CS/X (SPI-Chip-Select)
+Pin-22/GPIO-25         <---> DC/X (Data/Control Select for ILI9341)
+3.3V+                  <---> RST (We are not using reset pin)
+3.3V+                  <---> LED (No software illumination control)
+# ----------------------------------------------------------------'
+"""
 
-# Setup SPI bus using hardware SPI:
-spi = busio.SPI(clock=SCK, MOSI=MOSI, MISO=MISO)
+HW_CONFIGS = {
+    "rpi2zero": {
+        "spidev_device_path": "/dev/spidev0.0",
+        "gpiod_device_path": "/dev/gpiochip0",
+        "dcx_pin_id": 18,
+        "rst_pin_id": 22,
+        "spi_clock_hz": 42_000_000,
+        "spi_data_chunk_size": 0,  # No chunking!
+        "circuit_guide": CIRCUIT_GUIDE,
+    },
 
-# Create the ILI9341 display:
-display = ili9341.ILI9341(spi, cs=digitalio.DigitalInOut(CS_PIN),
-                          dc=digitalio.DigitalInOut(DC_PIN))
+    "rpi3": {
+        "spidev_device_path": "/dev/spidev0.0",
+        "gpiod_device_path": "/dev/gpiochip0",
+        "dcx_pin_id": 25,
+        "rst_pin_id": None,
+        "spi_clock_hz": 42_000_000,
+        "spi_data_chunk_size": 0,  # No chunking!
+        "circuit_guide": CIRCUIT_GUIDE,
+    },
 
-# Main loop:
-while True:
-    # Clear the display
-    display.fill(0)
-    # Draw a red pixel in the center.
-    display.pixel(120, 160, color565(255, 0, 0))
-    # Pause 2 seconds.
-    time.sleep(2)
-    # Clear the screen blue.
-    display.fill(color565(0, 0, 255))
-    # Pause 2 seconds.
-    time.sleep(2)
+    "rpi5": {
+        "spidev_device_path": "/dev/spidev0.0",
+        "gpiod_device_path": "/dev/gpiochip4",
+        "dcx_pin_id": 25,
+        "rst_pin_id": None,
+        "spi_clock_hz": 42_000_000,
+        "spi_data_chunk_size": 0,  # No chunking!
+        "circuit_guide": CIRCUIT_GUIDE,
+    },
+
+    "rpi5-chunked": {
+        "spidev_device_path": "/dev/spidev0.0",
+        "gpiod_device_path": "/dev/gpiochip4",
+        "dcx_pin_id": 25,
+        "rst_pin_id": None,
+        "spi_clock_hz": 42_000_000,
+        "spi_data_chunk_size": 2048,
+        "circuit_guide": CIRCUIT_GUIDE,
+    },
+
+    "up-squared-v2": {
+        "spidev_device_path": "/dev/spidev2.0",
+        "gpiod_device_path": "/dev/gpiochip5",
+        "dcx_pin_id": 25,
+        "rst_pin_id": None,
+        # Up squared v2 has a bug where SPI speed does not go over 1MHz.
+        # Seems like there is no way around it.
+        # Ref: https://forum.up-community.org/discussion/5032/spi-speed-on-up-squared-6000-does-not-go-over-1mhz
+        "spi_clock_hz": 20_000_000,
+        "spi_data_chunk_size": 0,
+        "circuit_guide": CIRCUIT_GUIDE,
+    }
+}
+
+
+def run_test_procedures(config_name):
+    print(f"Starting Ili9341Spidev display test using config '{config_name}' ...")
+    c = HW_CONFIGS[config_name]
+
+    print(c["circuit_guide"])
+    lcd = Ili9341Spidev(
+        spidev_device_path=c["spidev_device_path"],
+        gpiod_device_path=c["gpiod_device_path"],
+        dcx_pin_id=c["dcx_pin_id"],
+        rst_pin_id=c["rst_pin_id"],
+        spi_clock_hz=c["spi_clock_hz"],
+        spi_data_chunk_size=c["spi_data_chunk_size"])
+
+    lcd.clear((0xFF, 0xFF, 0xFF))
+
+    tp.test_fullscreen_color_paint(lcd)
+    time.sleep(1.0)
+    tp.test_draw_corner_boxes(lcd)
+    time.sleep(1.0)
+    tp.test_draw_random_boxes(lcd)
+    time.sleep(1.0)
+    tp.test_display_image(lcd)
+    time.sleep(10.0)
+    tp.test_play_video(lcd)
+    tp.test_webcam(lcd)
+
+
+USAGE = (
+    "USAGE: python3 demo.py {}"
+    .format("|".join(HW_CONFIGS.keys())))
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(USAGE)
+        sys.exit(1)
+
+    config_name = sys.argv[1]
+    if config_name not in HW_CONFIGS:
+        print(USAGE)
+        sys.exit(2)
+
+    run_test_procedures(config_name)
