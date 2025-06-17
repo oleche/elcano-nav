@@ -440,7 +440,7 @@ def index():
     networks = get_wifi_networks()
     setting = ''
     f = open(ELCANO_INFO_FILE,"r")
-        setting = f.read()
+    setting = f.read()
 
     setting.replace('token=', '', 1)
     return render_template('index.html', networks=networks, setting=setting)
