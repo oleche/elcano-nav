@@ -632,7 +632,7 @@ if __name__ == '__main__':
                 <input type="password" id="password" name="password">
             </div>
             
-            <div class="form-group" id="password-group" style="display: none;">
+            <div class="form-group" id="password-group">
                 <label for="token">Elcano Token:</label>
                 <input type="text" id="token" name="token" value={{setting}}>
             </div>
