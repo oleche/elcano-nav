@@ -85,3 +85,5 @@ If you encounter issues:
 ## Requirements
 
 1. `sudo apt-get install -y dnsmasq hostapd dhcpcd`
+2. `mkdir /opt/elcano`
+3. `echo "token=" > /opt/elcano/settings.ini`

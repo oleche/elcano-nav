@@ -20,7 +20,7 @@ if os.geteuid() != 0:
 
 # Configuration variables - modify these as needed
 AP_SSID = "Elcano_One"
-AP_PASSWORD = "elcano"  # Minimum 8 characters
+AP_PASSWORD = "elcanoone"  # Minimum 8 characters
 AP_CHANNEL = 7
 AP_COUNTRY = "NL"  # Change to your country code
 IP_ADDRESS = "192.168.4.1"
