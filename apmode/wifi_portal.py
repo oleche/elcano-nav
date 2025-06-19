@@ -888,7 +888,9 @@ if __name__ == '__main__':
         </div>
         
         <div class="content">
-            <button id="refresh-btn" class="refresh-btn">Refresh WiFi Networks</button>
+            <button id="refresh-btn" class="refresh-btn">
+                🔄 Refresh Networks
+            </button>
             
             <div id="loading" class="loading" style="display: none;">
                 <div class="spinner"></div>
@@ -932,7 +934,7 @@ if __name__ == '__main__':
                     <input type="text" id="token" name="token" class="input-field" value={{setting}}>
                 </div>
                 
-                <button type="submit">Connect</button>
+                <button type="submit" class="connect-btn">Connect to Network</button>
             </form>
         </div>
     </div>
