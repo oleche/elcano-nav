@@ -292,6 +292,7 @@ WIFI_CONFIG_PATH = '/etc/wpa_supplicant/wpa_supplicant.conf'
 WIFI_CONNECT_SCRIPT = '/usr/local/bin/connect_wifi.sh'
 SCAN_RESULTS_FILE = '/tmp/wifi_scan_results.json'
 ELCANO_INFO_FILE = '/opt/elcano/settings.ini'
+ELCANO_STATUS_FILE = '/opt/elcano/status.ini'
 
 def get_wifi_networks():
     # Scan for available WiFi networks
@@ -436,13 +437,15 @@ exit 1
 
 @app.route('/')
 def index():
+    with open(ELCANO_STATUS_FILE, "w") as f:
+        f.write("DISCONNECTED")
     # Render the WiFi setup page
     networks = get_wifi_networks()
     setting = ''
     f = open(ELCANO_INFO_FILE,"r")
     setting = f.read()
 
-    setting.replace('token=', '', 1)
+    setting = setting.replace('token=', '', 1)
     return render_template('index.html', networks=networks, setting=setting)
 
 @app.route('/scan')
@@ -472,9 +475,13 @@ def connect():
     success = connect_to_wifi(ssid, password)
     
     if success:
+        with open(ELCANO_STATUS_FILE, "w") as f:
+            f.write("CONNECTED")
         return render_template('success.html', 
                               ssid=ssid)
     else:
+        with open(ELCANO_STATUS_FILE, "w") as f:
+            f.write("CANNOT_CONNECT")
         return render_template('error.html', 
                               message='Failed to connect to WiFi')
 
