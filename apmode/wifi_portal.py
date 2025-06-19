@@ -497,148 +497,437 @@ if __name__ == '__main__':
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ElcanoNav WiFi Setup</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        h1 {
-            color: #e74c3c;
-            text-align: center;
-        }
-        .container {
-            background-color: #f9f9f9;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-        .network-list {
-            margin-bottom: 20px;
-        }
-        .network-item {
-            padding: 10px;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-        }
-        .network-item:hover {
-            background-color: #f0f0f0;
-        }
-        .network-item.selected {
-            background-color: #e8f4fc;
-        }
-        .signal-strength {
-            float: right;
-            font-size: 0.8em;
-            color: #666;
-        }
-        .locked {
-            margin-left: 5px;
-            color: #e74c3c;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        input[type="text"],
-        input[type="password"] {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+        * {
+            margin: 0;
+            padding: 0;
             box-sizing: border-box;
         }
-        button {
-            background-color: #e74c3c;
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .main-container {
+            max-width: 480px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: white;
+            padding: 32px 24px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 16px;
+            opacity: 0.8;
+            font-weight: 400;
+        }
+
+        .content {
+            padding: 32px 24px;
+        }
+
+        .refresh-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            padding: 10px 15px;
-            border-radius: 4px;
-            cursor: pointer;
+            padding: 16px 24px;
+            border-radius: 16px;
             font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .refresh-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
             width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
         }
-        button:hover {
-            background-color: #c0392b;
+
+        .refresh-btn:hover::before {
+            left: 100%;
         }
-        .refresh-btn {
-            background-color: #3498db;
-            margin-bottom: 10px;
-        }
+
         .refresh-btn:hover {
-            background-color: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
         }
+
+        .refresh-btn:active {
+            transform: translateY(0);
+        }
+
         .loading {
             text-align: center;
-            margin: 20px 0;
+            padding: 40px 0;
+            display: none;
         }
+
         .spinner {
-            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(102, 126, 234, 0.1);
             border-radius: 50%;
-            border-top: 4px solid #e74c3c;
-            width: 30px;
-            height: 30px;
+            border-top: 3px solid #667eea;
             animation: spin 1s linear infinite;
-            margin: 0 auto;
+            margin: 0 auto 16px;
         }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .loading p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .network-list {
+            background: #f8f9fa;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 24px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .network-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .network-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .network-list::-webkit-scrollbar-thumb {
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        .network-item {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+        }
+
+        .network-item:last-child {
+            border-bottom: none;
+        }
+
+        .network-item:hover {
+            background: rgba(102, 126, 234, 0.05);
+            transform: translateX(4px);
+        }
+
+        .network-item.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: translateX(0);
+        }
+
+        .network-item.selected .signal-strength,
+        .network-item.selected .locked {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .network-name {
+            font-weight: 500;
+            font-size: 16px;
+            flex: 1;
+        }
+
+        .network-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .signal-strength {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            background: rgba(0, 0, 0, 0.05);
+            padding: 4px 8px;
+            border-radius: 8px;
+        }
+
+        .locked {
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 16px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 16px;
+            font-size: 16px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        .input-field:read-only {
+            background: #e9ecef;
+            color: #666;
+        }
+
+        .connect-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: white;
+            border: none;
+            padding: 18px 24px;
+            border-radius: 16px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 8px;
+        }
+
+        .connect-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .connect-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 640px) {
+            body {
+                padding: 12px;
+            }
+
+            .main-container {
+                border-radius: 20px;
+                max-width: 100%;
+            }
+
+            .header {
+                padding: 24px 20px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .subtitle {
+                font-size: 14px;
+            }
+
+            .content {
+                padding: 24px 20px;
+            }
+
+            .network-list {
+                max-height: 250px;
+            }
+
+            .network-item {
+                padding: 14px 16px;
+            }
+
+            .network-name {
+                font-size: 15px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .network-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .network-meta {
+                align-self: flex-end;
+            }
+        }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            .main-container {
+                background: rgba(30, 30, 30, 0.95);
+                color: #e0e0e0;
+            }
+
+            .network-list {
+                background: #2a2a2a;
+            }
+
+            .network-item {
+                border-bottom-color: rgba(255, 255, 255, 0.1);
+            }
+
+            .network-item:hover {
+                background: rgba(102, 126, 234, 0.1);
+            }
+
+            .input-field {
+                background: #2a2a2a;
+                border-color: #404040;
+                color: #e0e0e0;
+            }
+
+            .input-field:focus {
+                background: #333;
+                border-color: #667eea;
+            }
+
+            .input-field:read-only {
+                background: #404040;
+                color: #999;
+            }
+
+            .signal-strength {
+                background: rgba(255, 255, 255, 0.1);
+                color: #ccc;
+            }
+
+            .form-label {
+                color: #e0e0e0;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Elcano Nav WiFi Setup</h1>
-        
-        <button id="refresh-btn" class="refresh-btn">Refresh WiFi Networks</button>
-        
-        <div id="loading" class="loading" style="display: none;">
-            <div class="spinner"></div>
-            <p>Scanning for networks...</p>
+    <div class="main-container">
+        <div class="header">
+            <h1>Elcano One</h1>
+            <div class="subtitle">WiFi Network Setup</div>
         </div>
         
-        <form id="wifi-form" action="/connect" method="post">
-            <div class="form-group">
-                <label for="network-list">Select WiFi Network:</label>
-                <div id="network-list" class="network-list">
-                    {% if networks %}
-                        {% for network in networks %}
-                            <div class="network-item" data-ssid="{{ network.ssid }}" data-encrypted="{{ network.encrypted }}">
-                                {{ network.ssid }}
-                                {% if network.encrypted %}
-                                    <span class="locked">🔒</span>
-                                {% endif %}
-                                <span class="signal-strength">{{ network.quality }}%</span>
-                            </div>
-                        {% endfor %}
-                    {% else %}
-                        <p>No networks found. Click "Refresh WiFi Networks" to scan again.</p>
-                    {% endif %}
+        <div class="content">
+            <button id="refresh-btn" class="refresh-btn">Refresh WiFi Networks</button>
+            
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Scanning for networks...</p>
+            </div>
+            
+            <form id="wifi-form" action="/connect" method="post">
+                <div class="form-group">
+                    <label for="network-list">Select WiFi Network:</label>
+                    <div id="network-list" class="network-list">
+                        {% if networks %}
+                            {% for network in networks %}
+                                <div class="network-item" data-ssid="{{ network.ssid }}" data-encrypted="{{ network.encrypted }}">
+                                    <div class="network-name">{{ network.ssid }}</div>
+                                    <div class="network-meta">
+                                    {% if network.encrypted %}
+                                        <span class="locked">🔒</span>
+                                    {% endif %}
+                                    <span class="signal-strength">{{ network.quality }}%</span>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <p>No networks found. Click "Refresh WiFi Networks" to scan again.</p>
+                        {% endif %}
+                    </div>
                 </div>
-            </div>
-            
-            <div class="form-group">
-                <label for="ssid">Selected Network:</label>
-                <input type="text" id="ssid" name="ssid" readonly required>
-            </div>
-            
-            <div class="form-group" id="password-group" style="display: none;">
-                <label for="password">Password:</label>
-                <input type="password" id="password" name="password">
-            </div>
-            
-            <div class="form-group" id="password-group">
-                <label for="token">Elcano Token:</label>
-                <input type="text" id="token" name="token" value={{setting}}>
-            </div>
-            
-            <button type="submit">Connect</button>
-        </form>
+                
+                <div class="form-group">
+                    <label class="form-label" for="ssid">Selected Network:</label>
+                    <input type="text" id="ssid" name="ssid" class="input-field"  readonly required>
+                </div>
+                
+                <div class="form-group" id="password-group" style="display: none;">
+                    <label class="form-label" for="password">Password:</label>
+                    <input type="password" id="password" class="input-field"  name="password">
+                </div>
+                
+                <div class="form-group" id="password-group">
+                    <label class="form-label" for="token">Elcano Token:</label>
+                    <input type="text" id="token" name="token" class="input-field" value={{setting}}>
+                </div>
+                
+                <button type="submit">Connect</button>
+            </form>
+        </div>
     </div>
 
     <script>
@@ -757,41 +1046,402 @@ if __name__ == '__main__':
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WiFi Setup Success</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .main-container {
+            max-width: 480px;
             margin: 0 auto;
-            padding: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            animation: slideUp 0.6s ease-out;
         }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: white;
+            padding: 32px 24px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        }
+
         h1 {
-            color: #27ae60;
-            text-align: center;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
         }
-        .container {
-            background-color: #f9f9f9;
+
+        .subtitle {
+            font-size: 16px;
+            opacity: 0.8;
+            font-weight: 400;
+        }
+
+        .content {
+            padding: 32px 24px;
+        }
+
+        .refresh-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px 24px;
+            border-radius: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .refresh-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .refresh-btn:hover::before {
+            left: 100%;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .refresh-btn:active {
+            transform: translateY(0);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px 0;
+            display: none;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(102, 126, 234, 0.1);
+            border-radius: 50%;
+            border-top: 3px solid #667eea;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .network-list {
+            background: #f8f9fa;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 24px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .network-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .network-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .network-list::-webkit-scrollbar-thumb {
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        .network-item {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+        }
+
+        .network-item:last-child {
+            border-bottom: none;
+        }
+
+        .network-item:hover {
+            background: rgba(102, 126, 234, 0.05);
+            transform: translateX(4px);
+        }
+
+        .network-item.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: translateX(0);
+        }
+
+        .network-item.selected .signal-strength,
+        .network-item.selected .locked {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .network-name {
+            font-weight: 500;
+            font-size: 16px;
+            flex: 1;
+        }
+
+        .network-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .signal-strength {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            background: rgba(0, 0, 0, 0.05);
+            padding: 4px 8px;
             border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            text-align: center;
         }
+
+        .locked {
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 16px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 16px;
+            font-size: 16px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        .input-field:read-only {
+            background: #e9ecef;
+            color: #666;
+        }
+
+        .connect-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: white;
+            border: none;
+            padding: 18px 24px;
+            border-radius: 16px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 8px;
+        }
+        
         .success-icon {
             font-size: 64px;
             color: #27ae60;
             margin-bottom: 20px;
         }
-        p {
-            margin-bottom: 15px;
-            line-height: 1.5;
+
+        .connect-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .connect-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 640px) {
+            body {
+                padding: 12px;
+            }
+
+            .main-container {
+                border-radius: 20px;
+                max-width: 100%;
+            }
+
+            .header {
+                padding: 24px 20px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .subtitle {
+                font-size: 14px;
+            }
+
+            .content {
+                padding: 24px 20px;
+            }
+
+            .network-list {
+                max-height: 250px;
+            }
+
+            .network-item {
+                padding: 14px 16px;
+            }
+
+            .network-name {
+                font-size: 15px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .network-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .network-meta {
+                align-self: flex-end;
+            }
+        }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            .main-container {
+                background: rgba(30, 30, 30, 0.95);
+                color: #e0e0e0;
+            }
+
+            .network-list {
+                background: #2a2a2a;
+            }
+
+            .network-item {
+                border-bottom-color: rgba(255, 255, 255, 0.1);
+            }
+
+            .network-item:hover {
+                background: rgba(102, 126, 234, 0.1);
+            }
+
+            .input-field {
+                background: #2a2a2a;
+                border-color: #404040;
+                color: #e0e0e0;
+            }
+
+            .input-field:focus {
+                background: #333;
+                border-color: #667eea;
+            }
+
+            .input-field:read-only {
+                background: #404040;
+                color: #999;
+            }
+
+            .signal-strength {
+                background: rgba(255, 255, 255, 0.1);
+                color: #ccc;
+            }
+
+            .form-label {
+                color: #e0e0e0;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="success-icon">✓</div>
-        <h1>WiFi Setup Successful</h1>
-        <p>Your Raspberry Pi is now connecting to <strong>{{ ssid }}</strong>.</p>
-        <p>The access point mode will be disabled, and your Raspberry Pi will restart in client mode.</p>
-        <p>If you need to change WiFi settings in the future, you can run the setup script again.</p>
+    <div class="main-container">
+        <div class="header">
+            <h1>ElcanoNav</h1>
+            <div class="subtitle">WiFi Network Setup</div>
+        </div>
+        
+        <div class="content">
+            <div class="success-icon">✓</div>
+            <h1>WiFi Setup Successful</h1>
+            <p>Your Raspberry Pi is now connecting to <strong>{{ ssid }}</strong>.</p>
+            <p>The access point mode will be disabled, and your Raspberry Pi will restart in client mode.</p>
+            <p>If you need to change WiFi settings in the future, you can run the setup script again.</p>
+        </div>
     </div>
 </body>
 </html>
@@ -805,55 +1455,401 @@ if __name__ == '__main__':
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WiFi Setup Error</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .main-container {
+            max-width: 480px;
             margin: 0 auto;
-            padding: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            animation: slideUp 0.6s ease-out;
         }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: white;
+            padding: 32px 24px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        }
+
         h1 {
-            color: #e74c3c;
-            text-align: center;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
         }
-        .container {
-            background-color: #f9f9f9;
+
+        .subtitle {
+            font-size: 16px;
+            opacity: 0.8;
+            font-weight: 400;
+        }
+
+        .content {
+            padding: 32px 24px;
+        }
+
+        .refresh-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px 24px;
+            border-radius: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .refresh-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .refresh-btn:hover::before {
+            left: 100%;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .refresh-btn:active {
+            transform: translateY(0);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px 0;
+            display: none;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(102, 126, 234, 0.1);
+            border-radius: 50%;
+            border-top: 3px solid #667eea;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .network-list {
+            background: #f8f9fa;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 24px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .network-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .network-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .network-list::-webkit-scrollbar-thumb {
+            background: #ddd;
+            border-radius: 2px;
+        }
+
+        .network-item {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+        }
+
+        .network-item:last-child {
+            border-bottom: none;
+        }
+
+        .network-item:hover {
+            background: rgba(102, 126, 234, 0.05);
+            transform: translateX(4px);
+        }
+
+        .network-item.selected {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: translateX(0);
+        }
+
+        .network-item.selected .signal-strength,
+        .network-item.selected .locked {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .network-name {
+            font-weight: 500;
+            font-size: 16px;
+            flex: 1;
+        }
+
+        .network-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .signal-strength {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            background: rgba(0, 0, 0, 0.05);
+            padding: 4px 8px;
             border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            text-align: center;
         }
+
+        .locked {
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 16px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 16px;
+            font-size: 16px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+
+        .input-field:read-only {
+            background: #e9ecef;
+            color: #666;
+        }
+
+        .back-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: white;
+            border: none;
+            padding: 18px 24px;
+            border-radius: 16px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 8px;
+        }
+        
         .error-icon {
             font-size: 64px;
             color: #e74c3c;
             margin-bottom: 20px;
         }
-        p {
-            margin-bottom: 15px;
-            line-height: 1.5;
-        }
-        .back-btn {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            text-decoration: none;
-            display: inline-block;
-            margin-top: 20px;
-        }
+
         .back-btn:hover {
-            background-color: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .back-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 640px) {
+            body {
+                padding: 12px;
+            }
+
+            .main-container {
+                border-radius: 20px;
+                max-width: 100%;
+            }
+
+            .header {
+                padding: 24px 20px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .subtitle {
+                font-size: 14px;
+            }
+
+            .content {
+                padding: 24px 20px;
+            }
+
+            .network-list {
+                max-height: 250px;
+            }
+
+            .network-item {
+                padding: 14px 16px;
+            }
+
+            .network-name {
+                font-size: 15px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .network-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .network-meta {
+                align-self: flex-end;
+            }
+        }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            .main-container {
+                background: rgba(30, 30, 30, 0.95);
+                color: #e0e0e0;
+            }
+
+            .network-list {
+                background: #2a2a2a;
+            }
+
+            .network-item {
+                border-bottom-color: rgba(255, 255, 255, 0.1);
+            }
+
+            .network-item:hover {
+                background: rgba(102, 126, 234, 0.1);
+            }
+
+            .input-field {
+                background: #2a2a2a;
+                border-color: #404040;
+                color: #e0e0e0;
+            }
+
+            .input-field:focus {
+                background: #333;
+                border-color: #667eea;
+            }
+
+            .input-field:read-only {
+                background: #404040;
+                color: #999;
+            }
+
+            .signal-strength {
+                background: rgba(255, 255, 255, 0.1);
+                color: #ccc;
+            }
+
+            .form-label {
+                color: #e0e0e0;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="error-icon">✗</div>
-        <h1>WiFi Setup Error</h1>
-        <p>{{ message }}</p>
-        <a href="/" class="back-btn">Back to WiFi Setup</a>
+    <div class="main-container">
+        <div class="header">
+            <h1>ElcanoNav</h1>
+            <div class="subtitle">WiFi Network Setup</div>
+        </div>
+        
+        <div class="content">
+            <div class="error-icon">✗</div>
+            <h1>WiFi Setup Error</h1>
+            <p>{{ message }}</p>
+            <a href="/" class="back-btn">Back to WiFi Setup</a>
+        </div>
     </div>
 </body>
 </html>
