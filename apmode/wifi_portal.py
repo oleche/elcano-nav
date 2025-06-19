@@ -1447,8 +1447,8 @@ if __name__ == '__main__':
         <div class="content">
             <div class="success-icon">✓</div>
             <h1>WiFi Setup Successful</h1>
-            <p>Your Raspberry Pi is now connecting to <strong>{{ ssid }}</strong>.</p>
-            <p>The access point mode will be disabled, and your Raspberry Pi will restart in client mode.</p>
+            <p>Your Elcano One is now connecting to <strong>{{ ssid }}</strong>.</p>
+            <p>The access point mode will be disabled, and your device will restart in client mode.</p>
             <p>If you need to change WiFi settings in the future, you can run the setup script again.</p>
         </div>
     </div>
@@ -1884,7 +1884,7 @@ if __name__ == '__main__':
 
 def main():
     """Main function"""
-    print("=== Raspberry Pi Zero WiFi Setup Portal ===")
+    print("=== Elcano One WiFi Setup Portal ===")
     
     # Register cleanup function
     atexit.register(cleanup)
