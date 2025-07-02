@@ -1,0 +1,26 @@
+{
+  "default_zoom": 14,
+  "min_zoom": 8,
+  "max_zoom": 18,
+  "update_interval": 30,
+  "button_pins": {
+    "zoom_in": 16,
+    "zoom_out": 20,
+    "button3": 21,
+    "button4": 26
+  },
+  "gps_settings": {
+    "port": "/dev/ttyAMA0",
+    "baudrate": 9600
+  },
+  "display_settings": {
+    "contrast_enhancement": 1.5,
+    "threshold": 128
+  },
+  "sync_settings": {
+    "api_base_url": "https://api.elcanonav.com",
+    "auto_sync_interval": 300,
+    "max_queue_size": 1000,
+    "batch_size": 100
+  }
+}
