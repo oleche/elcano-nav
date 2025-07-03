@@ -35,7 +35,7 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/gps-navigation
 Environment=ELCANONAV_SYNC_KEY=$SYNC_KEY
-ExecStart=/usr/bin/python3 /home/pi/gps-navigation/gps_navigation.py /home/pi/gps-navigation/map.mbtiles
+ExecStart=/usr/bin/python3 /home/pi/gps-navigation/gps_navigation.py
 Restart=always
 RestartSec=10
 
