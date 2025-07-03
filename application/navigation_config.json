@@ -11,7 +11,9 @@
   },
   "gps_settings": {
     "port": "/dev/ttyAMA0",
-    "baudrate": 9600
+    "baudrate": 9600,
+    "speed_change_threshold": 2.0,
+    "heading_change_threshold": 15.0
   },
   "display_settings": {
     "contrast_enhancement": 1.5,
@@ -22,5 +24,11 @@
     "auto_sync_interval": 300,
     "max_queue_size": 1000,
     "batch_size": 100
+  },
+  "assets_folder": "/opt/elcano/assets/",
+  "mbtiles_settings": {
+    "max_open_files": 3,
+    "cache_timeout": 300,
+    "auto_switch": true
   }
 }
