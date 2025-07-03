@@ -24,6 +24,15 @@ echo "Setting up sync key: $SYNC_KEY"
 # Add to environment
 echo "export ELCANONAV_SYNC_KEY=$SYNC_KEY" >> ~/.bashrc
 
+# Check if main script exists
+if [ ! -f "/home/pi/gps-navigation/gps_navigation.py" ]; then
+    echo "Error: gps_navigation.py not found in /home/pi/gps-navigation/"
+    echo "Please ensure all project files are in the correct location."
+    echo "Current directory contents:"
+    ls -la /home/pi/gps-navigation/
+    exit 1
+fi
+
 # Create systemd service for auto-start
 sudo tee /etc/systemd/system/gps-navigation.service > /dev/null <<EOF
 [Unit]
@@ -33,9 +42,11 @@ After=network.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/gps-navigation
+WorkingDirectory=%h/gps-navigation
+Environment=HOME=%h
+Environment=USER=%i
 Environment=ELCANONAV_SYNC_KEY=$SYNC_KEY
-ExecStart=/usr/bin/python3 /home/pi/gps-navigation/gps_navigation.py
+ExecStart=/usr/bin/python3 %h/gps-navigation/gps_navigation.py
 Restart=always
 RestartSec=10
 
@@ -52,3 +63,14 @@ echo "Sync key has been configured and service created."
 echo "To start the service: sudo systemctl start gps-navigation"
 echo "To check status: sudo systemctl status gps-navigation"
 echo "Reboot or source ~/.bashrc to load the environment variable"
+
+# Verify installation
+echo "Verifying installation..."
+if systemctl --user daemon-reload 2>/dev/null; then
+    echo "Using user service (recommended)"
+    systemctl --user enable gps-navigation.service
+    echo "Service enabled. To start: systemctl --user start gps-navigation"
+else
+    echo "Using system service"
+    echo "Service enabled. To start: sudo systemctl start gps-navigation"
+fi
