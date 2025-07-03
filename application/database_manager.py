@@ -14,33 +14,34 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+
 class DatabaseManager:
     """SQLite database manager for navigation system"""
-    
+
     def __init__(self, db_path='navigation.db'):
         self.db_path = db_path
         self.connection = None
         self.lock = threading.Lock()
         self._initialize_database()
-    
+
     def _initialize_database(self):
         """Initialize database with required tables"""
         try:
             self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
             self.connection.row_factory = sqlite3.Row
-            
+
             # Create tables
             self._create_tables()
             logger.info(f"Database initialized: {self.db_path}")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             raise
-    
+
     def _create_tables(self):
         """Create database tables"""
         cursor = self.connection.cursor()
-        
+
         # Device info table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS device_info (
@@ -58,7 +59,7 @@ class DatabaseManager:
                 sync_timestamp TEXT
             )
         ''')
-        
+
         # Trips table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS trips (
@@ -79,7 +80,7 @@ class DatabaseManager:
                 needs_sync INTEGER DEFAULT 0
             )
         ''')
-        
+
         # Map points table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS map_points (
@@ -99,7 +100,7 @@ class DatabaseManager:
                 FOREIGN KEY (trip_id) REFERENCES trips (id)
             )
         ''')
-        
+
         # Logbook entries table (for pending sync)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS logbook_entries (
@@ -117,7 +118,7 @@ class DatabaseManager:
                 FOREIGN KEY (trip_id) REFERENCES trips (id)
             )
         ''')
-        
+
         # Sync status table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS sync_status (
@@ -126,19 +127,19 @@ class DatabaseManager:
                 updated_at TEXT
             )
         ''')
-        
+
         self.connection.commit()
         logger.info("Database tables created/verified")
-    
+
     def store_device_sync_data(self, sync_data):
         """Store device and trips data from sync API"""
         with self.lock:
             cursor = self.connection.cursor()
-            
+
             try:
                 device = sync_data.get('device', {})
                 trips = sync_data.get('trips', [])
-                
+
                 # Store device info
                 cursor.execute('''
                     INSERT OR REPLACE INTO device_info 
@@ -160,7 +161,7 @@ class DatabaseManager:
                     device.get('updatedAt'),
                     sync_data.get('syncTimestamp')
                 ))
-                
+
                 # Store trips
                 for trip in trips:
                     cursor.execute('''
@@ -183,7 +184,7 @@ class DatabaseManager:
                         trip.get('createdAt'),
                         trip.get('updatedAt')
                     ))
-                    
+
                     # Store map points for this trip
                     map_points = trip.get('mapPoints', [])
                     for point in map_points:
@@ -208,16 +209,16 @@ class DatabaseManager:
                             point.get('timeFromPrevious'),
                             point.get('sequenceOrder')
                         ))
-                
+
                 self.connection.commit()
                 logger.info(f"Stored {len(trips)} trips with map points")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Error storing sync data: {e}")
                 self.connection.rollback()
                 return False
-    
+
     def get_trips(self):
         """Get all trips from database"""
         with self.lock:
@@ -227,7 +228,7 @@ class DatabaseManager:
                 ORDER BY date DESC, created_at DESC
             ''')
             return [dict(row) for row in cursor.fetchall()]
-    
+
     def get_trip_by_id(self, trip_id):
         """Get specific trip by ID"""
         with self.lock:
@@ -235,7 +236,7 @@ class DatabaseManager:
             cursor.execute('SELECT * FROM trips WHERE id = ?', (trip_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
-    
+
     def get_map_points_for_trip(self, trip_id):
         """Get all map points for a specific trip"""
         with self.lock:
@@ -246,21 +247,21 @@ class DatabaseManager:
                 ORDER BY sequence_order ASC, timestamp ASC
             ''', (trip_id,))
             return [dict(row) for row in cursor.fetchall()]
-    
+
     def set_active_trip(self, trip_id):
         """Set a trip as active (deactivate others)"""
         with self.lock:
             cursor = self.connection.cursor()
-            
+
             # Deactivate all trips
             cursor.execute('UPDATE trips SET is_active = 0')
-            
+
             # Activate selected trip
             cursor.execute('UPDATE trips SET is_active = 1 WHERE id = ?', (trip_id,))
-            
+
             self.connection.commit()
             logger.info(f"Set trip {trip_id} as active")
-    
+
     def get_active_trip(self):
         """Get the currently active trip"""
         with self.lock:
@@ -268,7 +269,7 @@ class DatabaseManager:
             cursor.execute('SELECT * FROM trips WHERE is_active = 1 LIMIT 1')
             row = cursor.fetchone()
             return dict(row) if row else None
-    
+
     def update_trip_status(self, trip_id, status, needs_sync=True):
         """Update trip status locally"""
         with self.lock:
@@ -278,17 +279,17 @@ class DatabaseManager:
                 SET local_status = ?, needs_sync = ?, updated_at = ?
                 WHERE id = ?
             ''', (status, 1 if needs_sync else 0, datetime.now().isoformat(), trip_id))
-            
+
             self.connection.commit()
             logger.info(f"Updated trip {trip_id} status to {status}")
-    
+
     def get_trips_needing_sync(self):
         """Get trips that need status sync"""
         with self.lock:
             cursor = self.connection.cursor()
             cursor.execute('SELECT * FROM trips WHERE needs_sync = 1')
             return [dict(row) for row in cursor.fetchall()]
-    
+
     def mark_trip_synced(self, trip_id):
         """Mark trip as synced"""
         with self.lock:
@@ -299,14 +300,14 @@ class DatabaseManager:
                 WHERE id = ?
             ''', (trip_id,))
             self.connection.commit()
-    
+
     def add_logbook_entry(self, trip_id, gps_data, content=None):
         """Add logbook entry for active trip"""
         with self.lock:
             cursor = self.connection.cursor()
-            
+
             entry_content = content or f"GPS update - Speed: {gps_data.get('speed', 0):.1f} km/h, Heading: {gps_data.get('heading', 0):.0f}°"
-            
+
             cursor.execute('''
                 INSERT INTO logbook_entries 
                 (trip_id, timestamp, latitude, longitude, altitude, speed, heading, content, created_at)
@@ -322,15 +323,15 @@ class DatabaseManager:
                 entry_content,
                 datetime.now().isoformat()
             ))
-            
+
             self.connection.commit()
             return cursor.lastrowid
-    
+
     def get_unsynced_logbook_entries(self, trip_id=None):
         """Get logbook entries that haven't been synced"""
         with self.lock:
             cursor = self.connection.cursor()
-            
+
             if trip_id:
                 cursor.execute('''
                     SELECT * FROM logbook_entries 
@@ -343,9 +344,9 @@ class DatabaseManager:
                     WHERE synced = 0 
                     ORDER BY timestamp ASC
                 ''')
-            
+
             return [dict(row) for row in cursor.fetchall()]
-    
+
     def mark_logbook_entries_synced(self, entry_ids):
         """Mark logbook entries as synced"""
         with self.lock:
@@ -353,7 +354,7 @@ class DatabaseManager:
             placeholders = ','.join(['?' for _ in entry_ids])
             cursor.execute(f'UPDATE logbook_entries SET synced = 1 WHERE id IN ({placeholders})', entry_ids)
             self.connection.commit()
-    
+
     def set_sync_status(self, key, value):
         """Set sync status value"""
         with self.lock:
@@ -363,7 +364,7 @@ class DatabaseManager:
                 VALUES (?, ?, ?)
             ''', (key, str(value), datetime.now().isoformat()))
             self.connection.commit()
-    
+
     def get_sync_status(self, key, default=None):
         """Get sync status value"""
         with self.lock:
@@ -371,7 +372,7 @@ class DatabaseManager:
             cursor.execute('SELECT value FROM sync_status WHERE key = ?', (key,))
             row = cursor.fetchone()
             return row[0] if row else default
-    
+
     def store_ping_position(self, position_data):
         """Store last ping position data"""
         with self.lock:
@@ -394,7 +395,7 @@ class DatabaseManager:
                 except json.JSONDecodeError:
                     return None
             return None
-    
+
     def close(self):
         """Close database connection"""
         if self.connection:
