@@ -353,9 +353,19 @@ class WiFiManager:
 class SyncManager:
     """API synchronization manager with enhanced trip management"""
 
+    def _read_sync_key(self):
+        """Read sync key from settings file"""
+        try:
+            with open('/opt/elcano/settings.ini', 'r') as f:
+                setting = f.read().strip()
+                return setting.replace('token=', '')
+        except Exception as e:
+            logger.warning(f"Could not read sync key from settings file: {e}")
+            return None
+
     def __init__(self, database_manager, sync_key=None, api_base_url="https://api.elcanonav.com"):
         self.db = database_manager
-        self.sync_key = sync_key or os.getenv('ELCANONAV_SYNC_KEY')
+        self.sync_key = sync_key or self._read_sync_key() or os.getenv('ELCANONAV_SYNC_KEY')
         self.api_base_url = api_base_url
         self.session = requests.Session()
         self.session.timeout = 30
