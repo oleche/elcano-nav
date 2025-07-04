@@ -37,7 +37,7 @@ echo ""
 echo "3. Checking serial port configuration..."
 
 # Check if serial is enabled in config
-if grep -q "enable_uart=1" /boot/config.txt 2>/dev/null || grep -q "enable_uart=1" /boot/firmware/config.txt 2>/dev/null; then
+if grep -q "enable_uart=1" /boot/firmware/config.txt 2>/dev/null ||  grep -q "enable_uart=1" /boot/config.txt 2>/dev/null; then
     echo "✓ UART is enabled in config.txt"
 else
     echo "✗ UART not enabled in config.txt"
@@ -45,7 +45,7 @@ else
 fi
 
 # Check if serial console is disabled
-if grep -q "console=serial" /boot/cmdline.txt 2>/dev/null || grep -q "console=serial" /boot/firmware/cmdline.txt 2>/dev/null; then
+if grep -q "console=serial" /boot/firmware/cmdline.txt 2>/dev/null || grep -q "console=serial" /boot/cmdline.txt 2>/dev/null ; then
     echo "✗ Serial console is enabled (conflicts with GPS)"
     echo "  Fix: Remove console=serial0,115200 from /boot/cmdline.txt"
 else
@@ -101,9 +101,9 @@ done
 echo "5. Automatic fixes..."
 
 # Fix 1: Enable UART
-CONFIG_FILE="/boot/config.txt"
+CONFIG_FILE="/boot/firmware/config.txt"
 if [ ! -f "$CONFIG_FILE" ]; then
-    CONFIG_FILE="/boot/firmware/config.txt"
+    CONFIG_FILE="/boot/config.txt"
 fi
 
 if [ -f "$CONFIG_FILE" ]; then
@@ -118,9 +118,9 @@ else
 fi
 
 # Fix 2: Disable serial console
-CMDLINE_FILE="/boot/cmdline.txt"
+CMDLINE_FILE="/boot/firmware/cmdline.txt"
 if [ ! -f "$CMDLINE_FILE" ]; then
-    CMDLINE_FILE="/boot/firmware/cmdline.txt"
+    CMDLINE_FILE="/boot/cmdline.txt"
 fi
 
 if [ -f "$CMDLINE_FILE" ]; then
