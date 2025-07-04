@@ -1466,7 +1466,7 @@ class NavigationSystem:
                 logger.info(f"Using default position from {filename}: {center_lat:.4f}, {center_lon:.4f}")
                 return center_lat, center_lon
 
-        # Fallback to San Francisco instead of Amsterdam
+        # Fallback to Amsterdam if no bounds found
         logger.warning("No map bounds found, using Amsterdam as default")
         return 52.3791, 4.9003
 
