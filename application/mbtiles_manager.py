@@ -56,6 +56,7 @@ class MBTilesManager:
 
                 self.available_files[file_path.name] = file_info
                 logger.info(f"Found MBTiles file: {file_path.name} - {file_info.get('name', 'Unknown')}")
+                logger.info(f"  Available zooms: {file_info.get('available_zooms', 'Unknown')}")
 
             except Exception as e:
                 logger.error(f"Error reading MBTiles file {file_path}: {e}")
@@ -111,7 +112,7 @@ class MBTilesManager:
                      bounds['min_lon'] <= lon <= bounds['max_lon'])
 
         logger.debug(f"Coordinate check: {lat:.4f},{lon:.4f} in bounds "
-                     f"[{bounds['min_lat']:.4f},{bounds['min_lat']:.4f}] to "
+                     f"[{bounds['min_lat']:.4f},{bounds['min_lon']:.4f}] to "
                      f"[{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}]: {in_bounds}")
 
         return in_bounds
@@ -211,7 +212,8 @@ class MBTilesManager:
                     'filename': filename,
                     'name': file_info.get('name', 'Unknown'),
                     'description': file_info.get('description', ''),
-                    'bounds': file_info.get('bounds')
+                    'bounds': file_info.get('bounds'),
+                    'available_zooms': file_info.get('available_zooms', [])
                 })
         return covering_files
 
@@ -230,9 +232,11 @@ class MBTilesManager:
         for filename, file_info in self.available_files.items():
             bounds = file_info.get('bounds')
             name = file_info.get('name', filename)
+            available_zooms = file_info.get('available_zooms', [])
             if bounds:
                 logger.info(f"  {name} ({filename}): "
                             f"[{bounds['min_lat']:.4f},{bounds['min_lon']:.4f}] to "
-                            f"[{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}]")
+                            f"[{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}] "
+                            f"zooms: {available_zooms}")
             else:
-                logger.info(f"  {name} ({filename}): No bounds information")
+                logger.info(f"  {name} ({filename}): No bounds information, zooms: {available_zooms}")

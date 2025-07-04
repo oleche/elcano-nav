@@ -1,7 +1,7 @@
 import sqlite3
 import io
 import math
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,57 @@ class MBTilesReader:
         for name, value in self.cursor.fetchall():
             metadata[name] = value
         return metadata
+
+    def get_available_zoom_levels(self):
+        """Get all available zoom levels in the MBTiles file."""
+        try:
+            self.cursor.execute("SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level")
+            zoom_levels = [row[0] for row in self.cursor.fetchall()]
+            logger.debug(f"Available zoom levels: {zoom_levels}")
+            return zoom_levels
+        except Exception as e:
+            logger.error(f"Error getting zoom levels: {e}")
+            return []
+
+    def get_best_available_zoom(self, requested_zoom):
+        """Get the best available zoom level for the requested zoom."""
+        available_zooms = self.get_available_zoom_levels()
+        if not available_zooms:
+            return requested_zoom
+
+        # If requested zoom is available, use it
+        if requested_zoom in available_zooms:
+            return requested_zoom
+
+        # Find closest available zoom level
+        closest_zoom = min(available_zooms, key=lambda x: abs(x - requested_zoom))
+
+        # If the closest zoom is significantly lower than 12, try to find a better one
+        if closest_zoom < 12 and requested_zoom >= 12:
+            higher_zooms = [z for z in available_zooms if z >= 12]
+            if higher_zooms:
+                closest_zoom = min(higher_zooms)
+
+        logger.info(f"Requested zoom {requested_zoom}, using available zoom {closest_zoom}")
+        return closest_zoom
+
+    def get_tile_count_at_zoom(self, zoom, lat, lon, tiles_x, tiles_y):
+        """Count how many tiles are available at a specific zoom level for the given area."""
+        center_x, center_y = self.deg2num(lat, lon, zoom)
+        start_x = int(center_x - tiles_x // 2)
+        start_y = int(center_y - tiles_y // 2)
+
+        available_count = 0
+        total_count = tiles_x * tiles_y
+
+        for ty in range(tiles_y):
+            for tx in range(tiles_x):
+                tile_x = start_x + tx
+                tile_y = start_y + ty
+                if self.get_tile(zoom, tile_x, tile_y):
+                    available_count += 1
+
+        return available_count, total_count
 
     def deg2num(self, lat_deg, lon_deg, zoom):
         """Convert latitude, longitude to tile coordinates."""
@@ -121,7 +172,6 @@ class MBTilesReader:
 
     def num2deg(self, xtile, ytile, zoom):
         """Convert tile coordinates to latitude, longitude."""
-        import math
         n = 2.0 ** zoom
         lon_deg = xtile / n * 360.0 - 180.0
         lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
@@ -149,7 +199,8 @@ class MBTilesReader:
             'bounds': bounds,
             'format': metadata.get('format', 'png'),
             'minzoom': int(metadata.get('minzoom', 0)),
-            'maxzoom': int(metadata.get('maxzoom', 18))
+            'maxzoom': int(metadata.get('maxzoom', 18)),
+            'available_zooms': self.get_available_zoom_levels()
         }
 
     def close(self):
@@ -157,16 +208,45 @@ class MBTilesReader:
         self.conn.close()
 
     def generate_composite_image(self, lat, lon, zoom, width=800, height=480, use_fallback=True, crop_to_size=True):
-        """Generate a composite image for the given coordinates and dimensions"""
+        """Generate a composite image for the given coordinates and dimensions with smart zoom fallback"""
         try:
-            # Calculate the center tile coordinates
-            center_x, center_y = self.deg2num(lat, lon, zoom)
-
             # Calculate how many tiles we need to cover the requested dimensions
-            # Assuming 256px tiles
             tile_size = 256
             tiles_x = math.ceil(width / tile_size) + 1
             tiles_y = math.ceil(height / tile_size) + 1
+
+            # Find the best zoom level to use
+            original_zoom = zoom
+            best_zoom = self.get_best_available_zoom(zoom)
+
+            # If we're using a different zoom, check tile availability
+            if best_zoom != zoom:
+                available_count, total_count = self.get_tile_count_at_zoom(best_zoom, lat, lon, tiles_x, tiles_y)
+                availability_ratio = available_count / total_count if total_count > 0 else 0
+
+                logger.info(
+                    f"Zoom {best_zoom}: {available_count}/{total_count} tiles available ({availability_ratio:.1%})")
+
+                # If availability is very low and we have other zoom options, try them
+                if availability_ratio < 0.3:
+                    available_zooms = self.get_available_zoom_levels()
+                    for test_zoom in sorted(available_zooms, key=lambda x: abs(x - zoom)):
+                        if test_zoom == best_zoom:
+                            continue
+                        test_available, test_total = self.get_tile_count_at_zoom(test_zoom, lat, lon, tiles_x, tiles_y)
+                        test_ratio = test_available / test_total if test_total > 0 else 0
+
+                        logger.debug(
+                            f"Testing zoom {test_zoom}: {test_available}/{test_total} tiles ({test_ratio:.1%})")
+
+                        if test_ratio > availability_ratio and test_ratio > 0.5:
+                            logger.info(f"Switching to zoom {test_zoom} with better availability ({test_ratio:.1%})")
+                            best_zoom = test_zoom
+                            availability_ratio = test_ratio
+                            break
+
+            # Calculate the center tile coordinates for the chosen zoom
+            center_x, center_y = self.deg2num(lat, lon, best_zoom)
 
             # Calculate the starting tile coordinates
             start_x = int(center_x - tiles_x // 2)
@@ -187,12 +267,35 @@ class MBTilesReader:
                     tile_y = start_y + ty
 
                     # Get tile data
-                    tile_data = self.get_tile_as_png(zoom, tile_x, tile_y)
+                    tile_data = self.get_tile_as_png(best_zoom, tile_x, tile_y)
 
                     if tile_data:
                         try:
                             # Load tile image
                             tile_image = Image.open(io.BytesIO(tile_data))
+
+                            # Resize tile if we're using a different zoom level
+                            if best_zoom != original_zoom:
+                                zoom_diff = original_zoom - best_zoom
+                                if zoom_diff > 0:
+                                    # Zooming in - crop and scale up
+                                    scale_factor = 2 ** zoom_diff
+                                    new_size = int(tile_size * scale_factor)
+                                    tile_image = tile_image.resize((new_size, new_size), Image.LANCZOS)
+                                    # Crop to tile_size
+                                    crop_offset = (new_size - tile_size) // 2
+                                    tile_image = tile_image.crop((crop_offset, crop_offset,
+                                                                  crop_offset + tile_size, crop_offset + tile_size))
+                                elif zoom_diff < 0:
+                                    # Zooming out - scale down
+                                    scale_factor = 2 ** abs(zoom_diff)
+                                    new_size = tile_size // scale_factor
+                                    tile_image = tile_image.resize((new_size, new_size), Image.LANCZOS)
+                                    # Center on a tile_size canvas
+                                    centered_tile = Image.new('RGB', (tile_size, tile_size), (240, 240, 240))
+                                    offset = (tile_size - new_size) // 2
+                                    centered_tile.paste(tile_image, (offset, offset))
+                                    tile_image = centered_tile
 
                             # Paste tile into composite
                             paste_x = tx * tile_size
@@ -203,6 +306,8 @@ class MBTilesReader:
                         except Exception as e:
                             logger.warning(f"Error loading tile {tile_x},{tile_y}: {e}")
                             tiles_missing += 1
+                            if use_fallback:
+                                self._add_fallback_tile(composite_image, tx * tile_size, ty * tile_size, tile_size)
                     else:
                         tiles_missing += 1
 
@@ -213,13 +318,22 @@ class MBTilesReader:
             # Crop to requested size if needed
             if crop_to_size:
                 # Calculate crop area to center the image
-                crop_x = (composite_width - width) // 2
-                crop_y = (composite_height - height) // 2
+                crop_x = max(0, (composite_width - width) // 2)
+                crop_y = max(0, (composite_height - height) // 2)
 
-                composite_image = composite_image.crop((
-                    crop_x, crop_y,
-                    crop_x + width, crop_y + height
-                ))
+                # Ensure we don't crop beyond image bounds
+                crop_x2 = min(composite_width, crop_x + width)
+                crop_y2 = min(composite_height, crop_y + height)
+
+                composite_image = composite_image.crop((crop_x, crop_y, crop_x2, crop_y2))
+
+                # If the cropped image is smaller than requested, pad it
+                if composite_image.size != (width, height):
+                    padded_image = Image.new('RGB', (width, height), (255, 255, 255))
+                    paste_x = (width - composite_image.width) // 2
+                    paste_y = (height - composite_image.height) // 2
+                    padded_image.paste(composite_image, (paste_x, paste_y))
+                    composite_image = padded_image
 
             # Convert to bytes
             output = io.BytesIO()
@@ -232,9 +346,16 @@ class MBTilesReader:
                 'tiles_missing': tiles_missing,
                 'center_tile_x': center_x,
                 'center_tile_y': center_y,
-                'zoom': zoom,
-                'composite_size': (composite_image.width, composite_image.height)
+                'requested_zoom': original_zoom,
+                'actual_zoom': best_zoom,
+                'zoom_adjusted': best_zoom != original_zoom,
+                'composite_size': (composite_image.width, composite_image.height),
+                'availability_ratio': tiles_found / (tiles_found + tiles_missing) if (
+                                                                                                 tiles_found + tiles_missing) > 0 else 0
             }
+
+            logger.info(f"Generated composite: {tiles_found} tiles found, {tiles_missing} missing, "
+                        f"zoom {original_zoom}→{best_zoom}, size {composite_image.size}")
 
             return image_data, metadata
 
@@ -242,21 +363,37 @@ class MBTilesReader:
             logger.error(f"Error generating composite image: {e}")
             # Return a blank image with error info
             blank_image = Image.new('RGB', (width, height), (255, 255, 255))
+
+            # Add error message to the blank image
+            try:
+                draw = ImageDraw.Draw(blank_image)
+                font = ImageFont.load_default()
+                error_text = f"Map Error: {str(e)[:50]}"
+                bbox = draw.textbbox((0, 0), error_text, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+                text_x = (width - text_width) // 2
+                text_y = (height - text_height) // 2
+                draw.text((text_x, text_y), error_text, fill=(128, 128, 128), font=font)
+            except:
+                pass
+
             output = io.BytesIO()
             blank_image.save(output, format='PNG')
 
             metadata = {
                 'error': str(e),
                 'tiles_found': 0,
-                'tiles_missing': 0
+                'tiles_missing': 0,
+                'requested_zoom': zoom,
+                'actual_zoom': zoom,
+                'zoom_adjusted': False
             }
 
             return output.getvalue(), metadata
 
     def _add_fallback_tile(self, composite_image, x, y, size):
         """Add a fallback tile when original tile is missing"""
-        from PIL import ImageDraw, ImageFont
-
         # Create a simple fallback tile
         fallback = Image.new('RGB', (size, size), (240, 240, 240))
         draw = ImageDraw.Draw(fallback)
