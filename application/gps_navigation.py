@@ -675,18 +675,27 @@ class MapRenderer:
         return image, {'error': 'rendering_error', 'error_message': error_msg}
 
     def _enhance_for_epaper(self, image):
-        """Enhance image contrast for e-paper display"""
-        # Increase contrast
-        from PIL import ImageEnhance
-        enhancer = ImageEnhance.Contrast(image)
-        image = enhancer.enhance(1.5)
+        """Enhance image contrast for e-paper display with inverted colors"""
+        # Convert to grayscale if not already
+        if image.mode != 'L':
+            image = image.convert('L')
 
-        # Apply threshold to make it more black and white
+        # Invert colors first (make light areas dark and vice versa)
         import numpy as np
         img_array = np.array(image)
-        img_array = np.where(img_array > 128, 255, 0)
+        img_array = 255 - img_array  # Invert: white becomes black, black becomes white
 
-        return Image.fromarray(img_array.astype('uint8'))
+        # Apply threshold to make it more black and white
+        # Use a lower threshold since we inverted (lighter areas become white)
+        img_array = np.where(img_array > 100, 255, 0)
+
+        # Increase contrast on the inverted image
+        inverted_image = Image.fromarray(img_array.astype('uint8'))
+        from PIL import ImageEnhance
+        enhancer = ImageEnhance.Contrast(inverted_image)
+        final_image = enhancer.enhance(1.2)  # Reduced contrast enhancement
+
+        return final_image
 
     def _add_overlays(self, image, lat, lon, zoom, heading, metadata, wifi_status=None, gps_status=None,
                       map_points=None):
@@ -1385,262 +1394,197 @@ class NavigationSystem:
             else:
                 compass_heading = 0.0
 
-        # Render map at default location
-        map_image, metadata = self.map_renderer.render_map(
-            default_lat,
-            default_lon,
-            self.current_zoom,
-            compass_heading,
-            wifi_status,
-            gps_status,
-            self.selected_trip_map_points
-        )
+            # Render map at default location
+            map_image, metadata = self.map_renderer.render_map(
+                default_lat,
+                default_lon,
+                self.current_zoom,
+                compass_heading,
+                wifi_status,
+                gps_status,
+                self.selected_trip_map_points
+            )
 
-        # Add waiting GPS box overlay
-        self._add_waiting_gps_box(map_image, gps_status, wifi_status, compass_heading)
+            # Add waiting GPS box overlay
+            self._add_waiting_gps_box(map_image, gps_status, wifi_status, compass_heading)
 
-        self.display.update(map_image)
+            self.display.update(map_image)
 
-    except Exception as e:
-    logger.error(f"Error showing waiting screen: {e}")
-    # Fallback to simple waiting screen
-    self._show_simple_waiting_screen(gps_status, wifi_status)
+        except Exception as e:
+            logger.error(f"Error showing waiting screen: {e}")
+            # Fallback to simple waiting screen
+            self._show_simple_waiting_screen(gps_status, wifi_status)
 
+    def _get_default_position(self):
+        """Get a good default position from available maps"""
+        available_files = self.mbtiles_manager.get_available_files()
 
-def _get_default_position(self):
-    """Get a good default position from available maps"""
-    available_files = self.mbtiles_manager.get_available_files()
+        if not available_files:
+            # Fallback to Amsterdam if no maps available
+            return 52.3676, 4.9041
 
-    if not available_files:
-        # Fallback to Amsterdam if no maps available
+        # Try to find a map with bounds and use its center
+        for filename, file_info in available_files.items():
+            bounds = file_info.get('bounds')
+            if bounds:
+                # Calculate center of bounds
+                center_lat = (bounds['min_lat'] + bounds['max_lat']) / 2
+                center_lon = (bounds['min_lon'] + bounds['max_lon']) / 2
+                logger.info(f"Using default position from {filename}: {center_lat:.4f}, {center_lon:.4f}")
+                return center_lat, center_lon
+
+        # Fallback to Amsterdam
+        logger.warning("No map bounds found, using Amsterdam as default")
         return 52.3676, 4.9041
 
-    # Try to find a map with bounds and use its center
-    for filename, file_info in available_files.items():
-        bounds = file_info.get('bounds')
-        if bounds:
-            # Calculate center of bounds
-            center_lat = (bounds['min_lat'] + bounds['max_lat']) / 2
-            center_lon = (bounds['min_lon'] + bounds['max_lon']) / 2
-            logger.info(f"Using default position from {filename}: {center_lat:.4f}, {center_lon:.4f}")
-            return center_lat, center_lon
+    def _show_simple_waiting_screen(self, gps_status, wifi_status):
+        """Fallback simple waiting screen"""
+        image = Image.new('L', (800, 480), 255)
+        draw = ImageDraw.Draw(image)
 
-    # Fallback to Amsterdam
-    logger.warning("No map bounds found, using Amsterdam as default")
-    return 52.3676, 4.9041
+        # Draw status bar
+        self.map_renderer._draw_status_bar(draw, wifi_status, gps_status, 0, 0)
 
+        # Title
+        draw.text((400, 200), "Waiting for GPS Signal...",
+                  fill=0, font=self.map_renderer.font_large, anchor="mm")
 
-def _show_simple_waiting_screen(self, gps_status, wifi_status):
-    """Fallback simple waiting screen"""
-    image = Image.new('L', (800, 480), 255)
-    draw = ImageDraw.Draw(image)
+        # GPS info
+        info_text = f"Satellites: {gps_status['satellites']}\n"
+        info_text += f"Fix Quality: {gps_status['fix_quality']}\n"
+        info_text += f"Last Update: {gps_status['last_update'] or 'Never'}"
 
-    # Draw status bar
-    self.map_renderer._draw_status_bar(draw, wifi_status, gps_status, 0, 0)
+        draw.text((400, 280), info_text, fill=0,
+                  font=self.map_renderer.font_medium, anchor="mm")
 
-    # Title
-    draw.text((400, 200), "Waiting for GPS Signal...",
-              fill=0, font=self.map_renderer.font_large, anchor="mm")
+        self.display.update(image)
 
-    # GPS info
-    info_text = f"Satellites: {gps_status['satellites']}\n"
-    info_text += f"Fix Quality: {gps_status['fix_quality']}\n"
-    info_text += f"Last Update: {gps_status['last_update'] or 'Never'}"
+    def _add_waiting_gps_box(self, image, gps_status, wifi_status, compass_heading):
+        """Add waiting for GPS box in lower right corner"""
+        draw = ImageDraw.Draw(image)
 
-    draw.text((400, 280), info_text, fill=0,
-              font=self.map_renderer.font_medium, anchor="mm")
+        # Box dimensions and position (lower right corner)
+        box_width = 280
+        box_height = 160
+        box_x = self.map_renderer.width - box_width - 20
+        box_y = self.map_renderer.height - box_height - 20
 
-    self.display.update(image)
+        # Draw box background with border
+        draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
+                       fill=255, outline=0, width=2)
 
+        # Title
+        title_x = box_x + box_width // 2
+        title_y = box_y + 15
+        draw.text((title_x, title_y), "Waiting for GPS Signal",
+                  fill=0, font=self.map_renderer.font_medium, anchor="mm")
 
-def _add_waiting_gps_box(self, image, gps_status, wifi_status, compass_heading):
-    """Add waiting for GPS box in lower right corner"""
-    draw = ImageDraw.Draw(image)
+        # GPS status info
+        info_y = title_y + 25
+        line_height = 18
 
-    # Box dimensions and position (lower right corner)
-    box_width = 280
-    box_height = 160
-    box_x = self.map_renderer.width - box_width - 20
-    box_y = self.map_renderer.height - box_height - 20
+        info_lines = [
+            f"Satellites: {gps_status['satellites']}",
+            f"Fix Quality: {gps_status['fix_quality']}",
+            f"Last Update: {gps_status['last_update'].strftime('%H:%M:%S') if gps_status['last_update'] else 'Never'}",
+            f"WiFi: {'Connected' if wifi_status['connected'] else 'Disconnected'}"
+        ]
 
-    # Draw box background with border
-    draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
-                   fill=255, outline=0, width=2)
+        if self.active_trip:
+            info_lines.append(f"Active Trip: {self.active_trip['title'][:20]}")
 
-    # Title
-    title_x = box_x + box_width // 2
-    title_y = box_y + 15
-    draw.text((title_x, title_y), "Waiting for GPS Signal",
-              fill=0, font=self.map_renderer.font_medium, anchor="mm")
+        # Add compass info if available
+        if self.gy511_available:
+            info_lines.append(f"Compass: {compass_heading:.0f}°")
 
-    # GPS status info
-    info_y = title_y + 25
-    line_height = 18
+        for i, line in enumerate(info_lines):
+            draw.text((box_x + 10, info_y + i * line_height), line,
+                      fill=0, font=self.map_renderer.font_small)
 
-    info_lines = [
-        f"Satellites: {gps_status['satellites']}",
-        f"Fix Quality: {gps_status['fix_quality']}",
-        f"Last Update: {gps_status['last_update'].strftime('%H:%M:%S') if gps_status['last_update'] else 'Never'}",
-        f"WiFi: {'Connected' if wifi_status['connected'] else 'Disconnected'}"
-    ]
+    def _add_gps_overlay(self, image, gps_status, compass_heading, wifi_status, metadata):
+        """Add GPS information overlay in lower left corner"""
+        draw = ImageDraw.Draw(image)
 
-    if self.active_trip:
-        info_lines.append(f"Active Trip: {self.active_trip['title'][:20]}")
+        # Create info box in lower left corner
+        box_width = 250
+        box_height = 140
+        box_x = 20
+        box_y = self.map_renderer.height - box_height - 20
 
-    # Add compass info if available
-    if self.gy511_available:
-        info_lines.append(f"Compass: {compass_heading:.0f}°")
+        # Draw box background with border
+        draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
+                       fill=255, outline=0, width=2)
 
-    for i, line in enumerate(info_lines):
-        draw.text((box_x + 10, info_y + i * line_height), line,
-                  fill=0, font=self.map_renderer.font_small)
+        # GPS information
+        y_pos = box_y + 10
+        line_height = 18
 
+        info_lines = [
+            f"Speed: {gps_status['speed']:.1f} km/h",
+            f"Heading: {gps_status['heading']:.0f}°",
+            f"Compass: {compass_heading:.0f}°" if self.gy511_available else None,
+            f"Satellites: {gps_status['satellites']}",
+            f"Region: {self._get_region_name()}"
+        ]
 
-def _add_gps_overlay(self, image, gps_status, compass_heading, wifi_status, metadata):
-    """Add GPS information overlay in lower left corner"""
-    draw = ImageDraw.Draw(image)
+        # Add active trip info if available
+        if self.active_trip:
+            info_lines.append(f"Trip: {self.active_trip['title'][:20]}")
 
+        # Add sync status
+        sync_status = self._get_sync_status_text()
+        info_lines.append(f"Sync: {sync_status}")
 
-# Create info box in lower left corner
-box_width = 250
-box_height = 140
-box_x = 20
-box_y = self.map_renderer.height - box_height - 20
+        # Filter out None values and draw
+        for i, line in enumerate([l for l in info_lines if l is not None]):
+            draw.text((box_x + 10, y_pos + i * line_height), line,
+                      fill=0, font=self.map_renderer.font_small)
 
-# Draw box background with border
-draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
-               fill=255, outline=0, width=2)
+    def _get_region_name(self):
+        """Get current region name"""
+        current_file_info = self.mbtiles_manager.get_current_file_info()
+        if current_file_info:
+            return current_file_info.get('name', 'Unknown')[:20]
+        return "No Map"
 
-# GPS information
-y_pos = box_y + 10
-line_height = 18
-
-info_lines = [
-    f"Speed: {gps_status['speed']:.1f} km/h",
-    f"Heading: {gps_status['heading']:.0f}°",
-    f"Compass: {compass_heading:.0f}°" if self.gy511_available else None,
-    f"Satellites: {gps_status['satellites']}",
-    f"Region: {self._get_region_name()}"
-]
-
-# Add active trip info if available
-if self.active_trip:
-    info_lines.append(f"Trip: {self.active_trip['title'][:20]}")
-
-# Add sync status
-sync_status = self._get_sync_status_text()
-info_lines.append(f"Sync: {sync_status}")
-
-# Filter out None values and draw
-for i, line in enumerate([l for l in info_lines if l is not None]):
-    draw.text((box_x + 10, y_pos + i * line_height), line,
-              fill=0, font=self.map_renderer.font_small)
-
-
-def _get_region_name(self):
-    """Get current region name"""
-    current_file_info = self.mbtiles_manager.get_current_file_info()
-    if current_file_info:
-        return current_file_info.get('name', 'Unknown')[:20]
-    return "No Map"
-
-
-def _get_sync_status_text(self):
-    """Get sync status text"""
-    if not self.sync_manager.is_valid_sync_key():
-        return "Setup required"
-    elif self.sync_in_progress:
-        return "Syncing..."
-    elif self.last_sync_attempt:
-        return self.last_sync_attempt.strftime('%H:%M')
-    else:
-        return "Not synced"
-
-
-def _add_gps_overlay(self, image, gps_status, compass_heading, wifi_status, metadata):
-    """Add GPS information overlay with regional map info"""
-    draw = ImageDraw.Draw(image)
-
-    # Speed and heading info
-    speed_text = f"Speed: {gps_status['speed']:.1f} km/h"
-    heading_text = f"Heading: {gps_status['heading']:.0f}°"
-    compass_text = f"Compass: {compass_heading:.0f}°"
-
-    # Draw on right side (moved down for status bar)
-    x_pos = self.map_renderer.width - 200
-    y_start = 150  # Moved down to accommodate status bar
-
-    draw.text((x_pos, y_start), speed_text, fill=0, font=self.map_renderer.font_small)
-    draw.text((x_pos, y_start + 20), heading_text, fill=0, font=self.map_renderer.font_small)
-    draw.text((x_pos, y_start + 40), compass_text, fill=0, font=self.map_renderer.font_small)
-
-    # Satellite info
-    sat_text = f"Sats: {gps_status['satellites']}"
-    draw.text((x_pos, y_start + 60), sat_text, fill=0, font=self.map_renderer.font_small)
-
-    # Regional map info
-    current_file_info = self.mbtiles_manager.get_current_file_info()
-    if current_file_info:
-        map_text = f"Map: {current_file_info['filename'][:15]}"
-        region_text = f"Region: {current_file_info.get('name', 'Unknown')[:15]}"
-        draw.text((x_pos, y_start + 80), map_text, fill=0, font=self.map_renderer.font_small)
-
-    # Active trip info
-    if self.active_trip:
-        trip_text = f"Trip: {self.active_trip['title'][:15]}"
-        status_text = f"Status: {self.active_trip.get('local_status', self.active_trip.get('status', 'UNKNOWN'))}"
-        draw.text((x_pos, y_start + 120), trip_text, fill=0, font=self.map_renderer.font_small)
-        draw.text((x_pos, y_start + 140), status_text, fill=0, font=self.map_renderer.font_small)
-
-    # Sync status
-    if not self.sync_manager.is_valid_sync_key():
-        sync_text = "Sync: Setup required"
-    elif self.sync_manager.is_enabled():
-        if self.sync_in_progress:
-            sync_text = "Syncing..."
+    def _get_sync_status_text(self):
+        """Get sync status text"""
+        if not self.sync_manager.is_valid_sync_key():
+            return "Setup required"
+        elif self.sync_in_progress:
+            return "Syncing..."
         elif self.last_sync_attempt:
-            sync_text = f"Last sync: {self.last_sync_attempt.strftime('%H:%M')}"
+            return self.last_sync_attempt.strftime('%H:%M')
         else:
-            sync_text = "Not synced"
-    else:
-        sync_text = "Sync disabled"
+            return "Not synced"
 
-    draw.text((x_pos, y_start + 160), sync_text, fill=0, font=self.map_renderer.font_small)
+    def shutdown(self):
+        """Shutdown navigation system"""
+        logger.info("Shutting down navigation system...")
 
-    # Queue status
-    unsynced_count = len(self.db.get_unsynced_logbook_entries())
-    if unsynced_count > 0:
-        queue_text = f"Queue: {unsynced_count}"
-        draw.text((x_pos, y_start + 180), queue_text, fill=0, font=self.map_renderer.font_small)
+        self.running = False
 
+        # Save configuration
+        self.config['default_zoom'] = self.current_zoom
+        self._save_config()
 
-def shutdown(self):
-    """Shutdown navigation system"""
-    logger.info("Shutting down navigation system...")
+        # Cleanup components
+        if hasattr(self, 'gps'):
+            self.gps.stop()
 
-    self.running = False
+        if hasattr(self, 'map_renderer'):
+            self.map_renderer.close()
 
-    # Save configuration
-    self.config['default_zoom'] = self.current_zoom
-    self._save_config()
+        if hasattr(self, 'mbtiles_manager'):
+            self.mbtiles_manager.close_all()
 
-    # Cleanup components
-    if hasattr(self, 'gps'):
-        self.gps.stop()
+        if hasattr(self, 'display'):
+            self.display.clear()
 
-    if hasattr(self, 'map_renderer'):
-        self.map_renderer.close()
+        if hasattr(self, 'db'):
+            self.db.close()
 
-    if hasattr(self, 'mbtiles_manager'):
-        self.mbtiles_manager.close_all()
-
-    if hasattr(self, 'display'):
-        self.display.clear()
-
-    if hasattr(self, 'db'):
-        self.db.close()
-
-    logger.info("Navigation system shutdown complete")
+        logger.info("Navigation system shutdown complete")
 
 
 def main():
