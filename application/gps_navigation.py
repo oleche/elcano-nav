@@ -981,7 +981,7 @@ class NavigationSystem:
         self.menu_system = MenuSystem(self.db)
 
         # Navigation state
-        self.current_zoom = self.config.get('default_zoom', 14)
+        self.current_zoom = self.config.get('default_zoom', 12)
         self.min_zoom = self.config.get('min_zoom', 8)
         self.max_zoom = self.config.get('max_zoom', 18)
         self.update_interval = self.config.get('update_interval', 30)
