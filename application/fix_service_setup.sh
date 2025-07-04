@@ -29,6 +29,7 @@ if [ ! -f "$PROJECT_DIR/gps_navigation.py" ]; then
     echo ""
     echo "Please copy all project files to $PROJECT_DIR/"
     echo "Required files:"
+    echo "  - gy511_sensor.py"
     echo "  - gps_navigation.py"
     echo "  - mbtiles_manager.py"
     echo "  - mbtiles_to_png.py"

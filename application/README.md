@@ -8,7 +8,7 @@ A real-time GPS navigation system using a Waveshare 7.5" e-paper display, GPS mo
 - Raspberry Pi 4 (recommended) or Pi 3B+
 - Waveshare 7.5" e-Paper Display (800x480)
 - GY-NEO6MV2 GPS Module
-- MPU6050 (GY-511) Accelerometer/Gyroscope
+- GY-511 (LSM303DLHC) Accelerometer/Magnetometer
 - 4x Push buttons with 10kΩ pull-up resistors
 - Breadboard and jumper wires
 
@@ -34,13 +34,17 @@ A real-time GPS navigation system using a Waveshare 7.5" e-paper display, GPS mo
 | TX | 10 | GPIO 15 | UART RX |
 | RX | 8 | GPIO 14 | UART TX |
 
-#### MPU6050 (GY-511)
-| MPU Pin | Pi Pin | GPIO | Function |
-|---------|--------|------|----------|
-| VCC | 17 | 3.3V | Power |
-| GND | 20 | GND | Ground |
+#### GY-511 (LSM303DLHC)
+| GY-511 Pin | Pi Pin | GPIO | Function |
+|------------|--------|------|----------|
+| VCC | 1 | 3.3V | Power |
+| GND | 6 | GND | Ground |
 | SDA | 3 | GPIO 2 | I2C Data |
 | SCL | 5 | GPIO 3 | I2C Clock |
+
+**Note**: The GY-511 contains two I2C devices:
+- LSM303DLHC Accelerometer at address 0x19
+- LSM303DLHC Magnetometer at address 0x1e
 
 #### Control Buttons
 | Button | Pi Pin | GPIO | Function |
@@ -193,9 +197,9 @@ Buttons → Zoom Control → Force Update
 
 ### Sensor Issues
 
-**MPU6050 not responding:**
+**GY-511 not responding:**
 - Check I2C is enabled: `i2cdetect -y 1`
-- Should show device at address 0x68
+- Should show device at address 0x19 and 0x1e
 - Verify SDA/SCL connections
 
 ### Performance Issues

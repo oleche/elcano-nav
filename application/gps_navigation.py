@@ -2,7 +2,7 @@
 """
 Raspberry Pi GPS Navigation System
 ==================================
-A real-time GPS navigation system using e-paper display, GPS module, and MPU6050 sensor.
+A real-time GPS navigation system using e-paper display, GPS module, and GY-511 sensor.
 Enhanced with database storage, trip management, menu system, and multi-regional MBTiles support.
 """
 
@@ -29,6 +29,7 @@ from mbtiles_manager import MBTilesManager
 from epaper_display import EPaperDisplay
 from database_manager import DatabaseManager
 from menu_system import MenuSystem
+from gy511_sensor import GY511
 
 # Configure logging
 logging.basicConfig(
@@ -237,67 +238,6 @@ class GPSModule:
             'fix_quality': self.fix_quality,
             'last_update': self.last_update
         }
-
-
-class MPU6050:
-    """MPU6050 accelerometer/gyroscope/magnetometer handler"""
-
-    def __init__(self, bus=1, address=0x68):
-        self.bus = smbus.SMBus(bus)
-        self.address = address
-        self.compass_heading = 0.0
-        self.accel_x = 0.0
-        self.accel_y = 0.0
-        self.accel_z = 0.0
-        self.gyro_x = 0.0
-        self.gyro_y = 0.0
-        self.gyro_z = 0.0
-
-    def initialize(self):
-        """Initialize MPU6050"""
-        try:
-            # Wake up the MPU6050
-            self.bus.write_byte_data(self.address, 0x6B, 0)
-            logger.info("MPU6050 initialized")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize MPU6050: {e}")
-            return False
-
-    def read_raw_data(self, addr):
-        """Read raw data from MPU6050"""
-        high = self.bus.read_byte_data(self.address, addr)
-        low = self.bus.read_byte_data(self.address, addr + 1)
-        value = ((high << 8) | low)
-        if value > 32768:
-            value = value - 65536
-        return value
-
-    def update_readings(self):
-        """Update sensor readings"""
-        try:
-            # Read accelerometer data
-            self.accel_x = self.read_raw_data(0x3B) / 16384.0
-            self.accel_y = self.read_raw_data(0x3D) / 16384.0
-            self.accel_z = self.read_raw_data(0x3F) / 16384.0
-
-            # Read gyroscope data
-            self.gyro_x = self.read_raw_data(0x43) / 131.0
-            self.gyro_y = self.read_raw_data(0x45) / 131.0
-            self.gyro_z = self.read_raw_data(0x47) / 131.0
-
-            # Calculate compass heading from accelerometer (tilt compensation would be better)
-            self.compass_heading = math.degrees(math.atan2(self.accel_y, self.accel_x))
-            if self.compass_heading < 0:
-                self.compass_heading += 360
-
-        except Exception as e:
-            logger.error(f"Error reading MPU6050: {e}")
-
-    def get_compass_heading(self):
-        """Get compass heading in degrees"""
-        self.update_readings()
-        return self.compass_heading
 
 
 class WiFiManager:
@@ -972,7 +912,7 @@ class NavigationSystem:
 
         # Initialize components
         self.gps = GPSModule()
-        self.mpu = MPU6050()
+        self.gy511 = GY511()  # Changed from MPU6050 to GY511
         self.display = EPaperDisplay()
 
         # Initialize MBTiles manager with multi-regional support
@@ -1218,9 +1158,10 @@ class NavigationSystem:
             logger.error("Failed to initialize GPS")
             return False
 
-        # Initialize MPU6050
-        if not self.mpu.initialize():
-            logger.warning("Failed to initialize MPU6050 - compass disabled")
+        # Initialize GY-511 (optional sensor)
+        self.gy511_available = self.gy511.initialize()
+        if not self.gy511_available:
+            logger.info("GY-511 compass sensor not available - using GPS heading only")
 
         # Load active trip if exists
         self.active_trip = self.db.get_active_trip()
@@ -1362,11 +1303,14 @@ class NavigationSystem:
                 self._show_waiting_screen(gps_status, wifi_status)
                 return
 
-            # Get compass heading
-            compass_heading = self.mpu.get_compass_heading()
+            # Get compass heading (only if GY-511 is available)
+            if self.gy511_available:
+                compass_heading = self.gy511.get_compass_heading()
+            else:
+                compass_heading = 0.0  # Default value when sensor not available
 
-            # Use GPS heading if available, otherwise use compass
-            heading = gps_status.get('heading', compass_heading)
+            # Use GPS heading if available, otherwise use compass (if available)
+            heading = gps_status.get('heading', compass_heading if self.gy511_available else 0.0)
 
             # Render map with status information and trip map points
             # The map renderer will automatically select the appropriate regional file

@@ -16,6 +16,7 @@ mkdir -p "$PROJECT_DIR"
 
 # List of required files
 FILES=(
+    "gy511_sensor.py"
     "gps_navigation.py"
     "mbtiles_manager.py"
     "mbtiles_to_png.py"
