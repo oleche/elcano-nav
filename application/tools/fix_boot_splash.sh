@@ -26,8 +26,8 @@ if [ ! -d "$PROJECT_DIR" ]; then
 fi
 
 # Check required files
-REQUIRED_FILES=("boot_splash.py" "epaper_display.py")
-MISSING_FILES=()
+REQUIRED_FILES="boot_splash.py" "epaper_display.py"
+MISSING_FILES=""
 
 for file in "${REQUIRED_FILES[@]}"; do
     if [ ! -f "$PROJECT_DIR/$file" ]; then
