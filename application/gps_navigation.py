@@ -381,6 +381,14 @@ class SyncManager:
         """Check if sync is enabled (has sync key)"""
         return self.sync_key is not None
 
+    def is_valid_sync_key(self):
+        """Check if sync key is valid (not default/placeholder)"""
+        if not self.sync_key:
+            return False
+        # Check for default/placeholder sync keys
+        invalid_keys = ['ABC1234567', 'PLACEHOLDER', 'DEFAULT', 'TEST123456']
+        return self.sync_key not in invalid_keys and len(self.sync_key) >= 10
+
     def should_ping(self):
         """Check if it's time to ping"""
         if not self.last_ping_time:
@@ -568,6 +576,7 @@ class MapRenderer:
         self.font_small = self._load_font(12)
         self.font_medium = self._load_font(16)
         self.font_large = self._load_font(20)
+        self.font_title = self._load_font(24)
 
     def _load_font(self, size):
         """Load font with fallback"""
@@ -578,6 +587,56 @@ class MapRenderer:
                 return ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", size)
             except:
                 return ImageFont.load_default()
+
+    def render_sync_setup_screen(self):
+        """Render sync setup configuration screen"""
+        image = Image.new('L', (self.width, self.height), 255)
+        draw = ImageDraw.Draw(image)
+
+        # Title
+        title = "Device Configuration Required"
+        bbox = draw.textbbox((0, 0), title, font=self.font_title)
+        title_width = bbox[2] - bbox[0]
+        title_x = (self.width - title_width) // 2
+        draw.text((title_x, 50), title, fill=0, font=self.font_title)
+
+        # Main message
+        y_pos = 120
+        messages = [
+            "This device needs to be configured with a",
+            "synchronization key to connect to ElcanoNav.",
+            "",
+            "To configure this device:",
+            "",
+            "1. Connect to WiFi network: 'elcano_nav'",
+            "",
+            "2. Open web browser and go to:",
+            "   http://192.168.4.1",
+            "",
+            "3. Configure WiFi settings and device key",
+            "",
+            "4. Restart the device after configuration"
+        ]
+
+        for message in messages:
+            if message:  # Skip empty lines for spacing
+                bbox = draw.textbbox((0, 0), message, font=self.font_medium)
+                text_width = bbox[2] - bbox[0]
+                text_x = (self.width - text_width) // 2
+                draw.text((text_x, y_pos), message, fill=0, font=self.font_medium)
+            y_pos += 25
+
+        # Bottom instruction
+        bottom_text = "Press any button to retry sync key detection"
+        bbox = draw.textbbox((0, 0), bottom_text, font=self.font_small)
+        text_width = bbox[2] - bbox[0]
+        text_x = (self.width - text_width) // 2
+        draw.text((text_x, self.height - 40), bottom_text, fill=0, font=self.font_small)
+
+        # Draw border
+        draw.rectangle([20, 20, self.width - 20, self.height - 20], outline=0, width=2)
+
+        return image
 
     def render_map(self, lat, lon, zoom, heading=0, wifi_status=None, gps_status=None, map_points=None):
         """Render map with overlays using appropriate regional MBTiles file"""
@@ -943,6 +1002,7 @@ class NavigationSystem:
         # Sync state
         self.last_sync_attempt = None
         self.sync_in_progress = False
+        self.show_sync_setup = False
 
         # Initialize buttons
         self._setup_buttons()
@@ -950,6 +1010,18 @@ class NavigationSystem:
         # Control flags
         self.running = False
         self.force_update = False
+
+        # Check sync key status on startup
+        self._check_sync_key_status()
+
+    def _check_sync_key_status(self):
+        """Check if sync key is valid and set display mode accordingly"""
+        if not self.sync_manager.is_valid_sync_key():
+            self.show_sync_setup = True
+            logger.warning("Invalid or missing sync key - showing setup screen")
+        else:
+            self.show_sync_setup = False
+            logger.info(f"Valid sync key configured: {self.sync_manager.sync_key[:3]}...")
 
     def _load_config(self):
         """Load configuration from file"""
@@ -1006,6 +1078,12 @@ class NavigationSystem:
 
     def _button1_pressed(self):
         """Handle button 1 - Zoom in or menu navigation"""
+        if self.show_sync_setup:
+            # Any button press in sync setup mode retries sync key detection
+            self._check_sync_key_status()
+            self.force_update = True
+            return
+
         if self.menu_system.is_visible():
             self.menu_system.navigate_up()
             self.force_update = True
@@ -1018,6 +1096,12 @@ class NavigationSystem:
 
     def _button2_pressed(self):
         """Handle button 2 - Zoom out or menu navigation"""
+        if self.show_sync_setup:
+            # Any button press in sync setup mode retries sync key detection
+            self._check_sync_key_status()
+            self.force_update = True
+            return
+
         if self.menu_system.is_visible():
             self.menu_system.navigate_down()
             self.force_update = True
@@ -1030,6 +1114,12 @@ class NavigationSystem:
 
     def _button3_pressed(self):
         """Handle button 3 - Sync or menu selection"""
+        if self.show_sync_setup:
+            # Any button press in sync setup mode retries sync key detection
+            self._check_sync_key_status()
+            self.force_update = True
+            return
+
         if self.menu_system.is_visible():
             action = self.menu_system.select_current()
             self._handle_menu_action(action)
@@ -1046,6 +1136,12 @@ class NavigationSystem:
 
     def _button4_pressed(self):
         """Handle button 4 - Menu toggle"""
+        if self.show_sync_setup:
+            # Any button press in sync setup mode retries sync key detection
+            self._check_sync_key_status()
+            self.force_update = True
+            return
+
         if self.menu_system.is_visible():
             action = self.menu_system.go_back()
             self._handle_menu_action(action)
@@ -1156,8 +1252,9 @@ class NavigationSystem:
                 # Check WiFi status
                 wifi_connected = self.wifi_manager.check_wifi_status()
 
-                # Ping device every minute if WiFi connected
-                if wifi_connected and self.sync_manager.should_ping():
+                # Ping device every minute if WiFi connected and sync key is valid
+                if (wifi_connected and self.sync_manager.should_ping() and
+                        self.sync_manager.is_valid_sync_key()):
                     threading.Thread(target=self._ping_device, daemon=True).start()
 
                 # Check if update is needed
@@ -1228,6 +1325,13 @@ class NavigationSystem:
     def _update_display(self):
         """Update the display with current information"""
         try:
+            # Check if sync setup screen should be displayed
+            if self.show_sync_setup:
+                setup_image = self.map_renderer.render_sync_setup_screen()
+                self.display.update(setup_image)
+                logger.info("Displaying sync setup screen")
+                return
+
             # Check if menu should be displayed
             if self.menu_system.is_visible():
                 menu_image = self.menu_system.render_menu()
@@ -1248,8 +1352,9 @@ class NavigationSystem:
                     entry_id = self.db.add_logbook_entry(self.active_trip['id'], gps_status)
                     logger.debug(f"Added logbook entry {entry_id} for trip {self.active_trip['title']}")
 
-                    # Sync immediately if WiFi available
-                    if wifi_status['connected'] and self.sync_manager.is_enabled():
+                    # Sync immediately if WiFi available and sync key is valid
+                    if (wifi_status['connected'] and self.sync_manager.is_enabled() and
+                            self.sync_manager.is_valid_sync_key()):
                         threading.Thread(target=self._sync_single_logbook_entry, args=(entry_id,), daemon=True).start()
 
             if gps_status['fix_quality'] == 0:
@@ -1336,6 +1441,14 @@ class NavigationSystem:
         if available_files:
             info_text += f"\nAvailable Maps: {len(available_files)} regions"
 
+        # Show sync status
+        if not self.sync_manager.is_valid_sync_key():
+            info_text += f"\nSync: Configuration required"
+        elif self.sync_manager.is_enabled():
+            info_text += f"\nSync: Enabled"
+        else:
+            info_text += f"\nSync: Disabled"
+
         draw.text((400, 280), info_text, fill=0,
                   font=self.map_renderer.font_medium, anchor="mm")
 
@@ -1378,15 +1491,19 @@ class NavigationSystem:
             draw.text((x_pos, y_start + 140), status_text, fill=0, font=self.map_renderer.font_small)
 
         # Sync status
-        if self.sync_manager.is_enabled():
+        if not self.sync_manager.is_valid_sync_key():
+            sync_text = "Sync: Setup required"
+        elif self.sync_manager.is_enabled():
             if self.sync_in_progress:
                 sync_text = "Syncing..."
             elif self.last_sync_attempt:
                 sync_text = f"Last sync: {self.last_sync_attempt.strftime('%H:%M')}"
             else:
                 sync_text = "Not synced"
+        else:
+            sync_text = "Sync disabled"
 
-            draw.text((x_pos, y_start + 160), sync_text, fill=0, font=self.map_renderer.font_small)
+        draw.text((x_pos, y_start + 160), sync_text, fill=0, font=self.map_renderer.font_small)
 
         # Queue status
         unsynced_count = len(self.db.get_unsynced_logbook_entries())
