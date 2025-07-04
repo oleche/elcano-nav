@@ -706,8 +706,9 @@ class MapRenderer:
         # Draw graticule
         self._draw_graticule(draw, lat, lon, zoom)
 
-        # Draw compass rose
-        self._draw_compass_rose(draw, heading)
+        # Draw compass rose - force show if we have GY-511 data
+        has_gy511_data = hasattr(self, '_last_gy511_heading') or heading != 0
+        self._draw_compass_rose(draw, heading, force_show=has_gy511_data)
 
         # Draw info panel (moved down to accommodate status bar)
         self._draw_info_panel(draw, lat, lon, zoom, metadata)
@@ -820,8 +821,12 @@ class MapRenderer:
         for y in range(0, self.height, grid_pixel_spacing):
             draw.line([0, y, self.width, y], fill=128, width=1)
 
-    def _draw_compass_rose(self, draw, heading):
-        """Draw compass rose"""
+    def _draw_compass_rose(self, draw, heading, force_show=False):
+        """Draw compass rose - always visible when GY-511 available or force_show is True"""
+        # Only draw if we have meaningful heading data or forced
+        if heading == 0.0 and not force_show:
+            return
+
         center_x = self.width - 80
         center_y = 80
         radius = 60
@@ -858,6 +863,10 @@ class MapRenderer:
             (arrow_x + 5, arrow_y + 5)
         ]
         draw.polygon(arrow_points, fill=0)
+
+        # Add compass label
+        draw.text((center_x, center_y + radius + 15), "COMPASS",
+                  fill=0, font=self.font_small, anchor="mm")
 
     def _draw_info_panel(self, draw, lat, lon, zoom, metadata):
         """Draw information panel with regional map info"""
@@ -1306,8 +1315,10 @@ class NavigationSystem:
             # Get compass heading (only if GY-511 is available)
             if self.gy511_available:
                 compass_heading = self.gy511.get_compass_heading()
+                # Store for compass rose visibility
+                self.map_renderer._last_gy511_heading = compass_heading
             else:
-                compass_heading = 0.0  # Default value when sensor not available
+                compass_heading = 0.0
 
             # Use GPS heading if available, otherwise use compass (if available)
             heading = gps_status.get('heading', compass_heading if self.gy511_available else 0.0)
@@ -1360,7 +1371,41 @@ class NavigationSystem:
             logger.error(f"Error syncing single logbook entry: {e}")
 
     def _show_waiting_screen(self, gps_status, wifi_status):
-        """Show waiting for GPS screen"""
+        """Show map with waiting for GPS box in lower right corner"""
+        # Default Amsterdam coordinates
+        default_lat = 52.3676
+        default_lon = 4.9041
+
+        try:
+            # Get compass heading from GY-511 if available
+            if self.gy511_available:
+                compass_heading = self.gy511.get_compass_heading()
+            else:
+                compass_heading = 0.0
+
+            # Render map at default Amsterdam location
+            map_image, metadata = self.map_renderer.render_map(
+                default_lat,
+                default_lon,
+                self.current_zoom,
+                compass_heading,
+                wifi_status,
+                gps_status,
+                self.selected_trip_map_points
+            )
+
+            # Add waiting GPS box overlay
+            self._add_waiting_gps_box(map_image, gps_status, wifi_status, compass_heading)
+
+            self.display.update(map_image)
+
+        except Exception as e:
+            logger.error(f"Error showing waiting screen: {e}")
+            # Fallback to simple waiting screen
+            self._show_simple_waiting_screen(gps_status, wifi_status)
+
+    def _show_simple_waiting_screen(self, gps_status, wifi_status):
+        """Fallback simple waiting screen"""
         image = Image.new('L', (800, 480), 255)
         draw = ImageDraw.Draw(image)
 
@@ -1374,29 +1419,54 @@ class NavigationSystem:
         # GPS info
         info_text = f"Satellites: {gps_status['satellites']}\n"
         info_text += f"Fix Quality: {gps_status['fix_quality']}\n"
-        info_text += f"Last Update: {gps_status['last_update'] or 'Never'}\n"
-        info_text += f"WiFi: {'Connected' if wifi_status['connected'] else 'Disconnected'}"
-
-        if self.active_trip:
-            info_text += f"\nActive Trip: {self.active_trip['title']}"
-
-        # Show available regional files
-        available_files = self.mbtiles_manager.get_available_files()
-        if available_files:
-            info_text += f"\nAvailable Maps: {len(available_files)} regions"
-
-        # Show sync status
-        if not self.sync_manager.is_valid_sync_key():
-            info_text += f"\nSync: Configuration required"
-        elif self.sync_manager.is_enabled():
-            info_text += f"\nSync: Enabled"
-        else:
-            info_text += f"\nSync: Disabled"
+        info_text += f"Last Update: {gps_status['last_update'] or 'Never'}"
 
         draw.text((400, 280), info_text, fill=0,
                   font=self.map_renderer.font_medium, anchor="mm")
 
         self.display.update(image)
+
+    def _add_waiting_gps_box(self, image, gps_status, wifi_status, compass_heading):
+        """Add waiting for GPS box in lower right corner"""
+        draw = ImageDraw.Draw(image)
+
+        # Box dimensions and position (lower right corner)
+        box_width = 280
+        box_height = 160
+        box_x = self.map_renderer.width - box_width - 20
+        box_y = self.map_renderer.height - box_height - 20
+
+        # Draw box background with border
+        draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
+                       fill=255, outline=0, width=2)
+
+        # Title
+        title_x = box_x + box_width // 2
+        title_y = box_y + 15
+        draw.text((title_x, title_y), "Waiting for GPS Signal",
+                  fill=0, font=self.map_renderer.font_medium, anchor="mm")
+
+        # GPS status info
+        info_y = title_y + 25
+        line_height = 18
+
+        info_lines = [
+            f"Satellites: {gps_status['satellites']}",
+            f"Fix Quality: {gps_status['fix_quality']}",
+            f"Last Update: {gps_status['last_update'].strftime('%H:%M:%S') if gps_status['last_update'] else 'Never'}",
+            f"WiFi: {'Connected' if wifi_status['connected'] else 'Disconnected'}"
+        ]
+
+        if self.active_trip:
+            info_lines.append(f"Active Trip: {self.active_trip['title'][:20]}")
+
+        # Add compass info if available
+        if self.gy511_available:
+            info_lines.append(f"Compass: {compass_heading:.0f}°")
+
+        for i, line in enumerate(info_lines):
+            draw.text((box_x + 10, info_y + i * line_height), line,
+                      fill=0, font=self.map_renderer.font_small)
 
     def _add_gps_overlay(self, image, gps_status, compass_heading, wifi_status, metadata):
         """Add GPS information overlay with regional map info"""
