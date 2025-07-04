@@ -31,7 +31,7 @@ MISSING_FILES=""
 
 for file in "${REQUIRED_FILES[@]}"; do
     if [ ! -f "$PROJECT_DIR/$file" ]; then
-        MISSING_FILES+=("$file")
+        MISSING_FILES+="$file"
     fi
 done
 
