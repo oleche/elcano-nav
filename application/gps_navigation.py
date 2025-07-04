@@ -615,7 +615,7 @@ class MapRenderer:
             "",
             "3. Configure WiFi settings and device key",
             "",
-            "4. Restart the device after configuration"
+            "4. The device will restart after configuration"
         ]
 
         for message in messages:
