@@ -1436,7 +1436,7 @@ class NavigationSystem:
 
         if not available_files:
             # Fallback to San Francisco if no maps available
-            return 37.7749, -122.4194
+            return 52.3791, 4.9003
 
         # Try to find a map with bounds and use its center
         for filename, file_info in available_files.items():
@@ -1449,8 +1449,8 @@ class NavigationSystem:
                 return center_lat, center_lon
 
         # Fallback to San Francisco instead of Amsterdam
-        logger.warning("No map bounds found, using San Francisco as default")
-        return 37.7749, -122.4194
+        logger.warning("No map bounds found, using Amsterdam as default")
+        return 52.3791, 4.9003
 
     def _show_simple_waiting_screen(self, gps_status, wifi_status):
         """Fallback simple waiting screen"""
