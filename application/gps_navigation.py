@@ -368,8 +368,8 @@ class SyncManager:
                 if 'lastLatitude' in response_data:
                     self.db.set_sync_status('last_ping_position', json.dumps({
                         'latitude': response_data.get('lastLatitude'),
-                        'longitude': response_data.get('lastLongitude'),
-                        'heading': response_data.get('lastHeading'),
+                        'longitude': response_data.get('longitude'),
+                        'heading': response_data.get('heading'),
                         'course': response_data.get('lastCourse'),
                         'timestamp': response_data.get('lastUpdate')
                     }))
@@ -831,14 +831,15 @@ class MapRenderer:
             draw.line([0, y, self.width, y], fill=128, width=1)
 
     def _draw_compass_rose(self, draw, heading, force_show=False):
-        """Draw compass rose - always visible when GY-511 available or force_show is True"""
+        """Draw compass rose in lower left corner - always visible when GY-511 available or force_show is True"""
         # Only draw if we have meaningful heading data or forced
         if heading == 0.0 and not force_show:
             return
 
-        center_x = self.width - 80
-        center_y = 80
-        radius = 60
+        # Position in lower left corner
+        center_x = 80
+        center_y = self.height - 80
+        radius = 50
 
         # Draw outer circle
         draw.ellipse([center_x - radius, center_y - radius,
@@ -913,6 +914,20 @@ class MapRenderer:
         """Close MBTiles manager"""
         if self.mbtiles_manager:
             self.mbtiles_manager.close_all()
+
+    def _draw_rounded_rectangle(self, draw, bbox, radius=10, fill=255, outline=0, width=2):
+        """Draw a rounded rectangle"""
+        x1, y1, x2, y2 = bbox
+
+        # Draw the main rectangle
+        draw.rectangle([x1 + radius, y1, x2 - radius, y2], fill=fill, outline=outline, width=width)
+        draw.rectangle([x1, y1 + radius, x2, y2 - radius], fill=fill, outline=outline, width=width)
+
+        # Draw the corners
+        draw.pieslice([x1, y1, x1 + 2 * radius, y1 + 2 * radius], 180, 270, fill=fill, outline=outline, width=width)
+        draw.pieslice([x2 - 2 * radius, y1, x2, y1 + 2 * radius], 270, 360, fill=fill, outline=outline, width=width)
+        draw.pieslice([x1, y2 - 2 * radius, x1 + 2 * radius, y2], 90, 180, fill=fill, outline=outline, width=width)
+        draw.pieslice([x2 - 2 * radius, y2 - 2 * radius, x2, y2], 0, 90, fill=fill, outline=outline, width=width)
 
 
 class NavigationSystem:
@@ -1420,8 +1435,8 @@ class NavigationSystem:
         available_files = self.mbtiles_manager.get_available_files()
 
         if not available_files:
-            # Fallback to Amsterdam if no maps available
-            return 52.3676, 4.9041
+            # Fallback to San Francisco if no maps available
+            return 37.7749, -122.4194
 
         # Try to find a map with bounds and use its center
         for filename, file_info in available_files.items():
@@ -1433,9 +1448,9 @@ class NavigationSystem:
                 logger.info(f"Using default position from {filename}: {center_lat:.4f}, {center_lon:.4f}")
                 return center_lat, center_lon
 
-        # Fallback to Amsterdam
-        logger.warning("No map bounds found, using Amsterdam as default")
-        return 52.3676, 4.9041
+        # Fallback to San Francisco instead of Amsterdam
+        logger.warning("No map bounds found, using San Francisco as default")
+        return 37.7749, -122.4194
 
     def _show_simple_waiting_screen(self, gps_status, wifi_status):
         """Fallback simple waiting screen"""
@@ -1454,13 +1469,13 @@ class NavigationSystem:
         info_text += f"Fix Quality: {gps_status['fix_quality']}\n"
         info_text += f"Last Update: {gps_status['last_update'] or 'Never'}"
 
-        draw.text((400, 280), info_text, fill=0,
-                  font=self.map_renderer.font_medium, anchor="mm")
+        draw.text((400, 280), info_text,
+                  fill=0, font=self.map_renderer.font_medium, anchor="mm")
 
         self.display.update(image)
 
     def _add_waiting_gps_box(self, image, gps_status, wifi_status, compass_heading):
-        """Add waiting for GPS box in lower right corner"""
+        """Add waiting for GPS box in lower right corner with rounded corners"""
         draw = ImageDraw.Draw(image)
 
         # Box dimensions and position (lower right corner)
@@ -1469,9 +1484,15 @@ class NavigationSystem:
         box_x = self.map_renderer.width - box_width - 20
         box_y = self.map_renderer.height - box_height - 20
 
-        # Draw box background with border
-        draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
-                       fill=255, outline=0, width=2)
+        # Draw rounded box background with border
+        self.map_renderer._draw_rounded_rectangle(
+            draw,
+            [box_x, box_y, box_x + box_width, box_y + box_height],
+            radius=15,
+            fill=255,
+            outline=0,
+            width=2
+        )
 
         # Title
         title_x = box_x + box_width // 2
@@ -1502,18 +1523,24 @@ class NavigationSystem:
                       fill=0, font=self.map_renderer.font_small)
 
     def _add_gps_overlay(self, image, gps_status, compass_heading, wifi_status, metadata):
-        """Add GPS information overlay in lower left corner"""
+        """Add GPS information overlay in lower right corner (moved from left to avoid compass)"""
         draw = ImageDraw.Draw(image)
 
-        # Create info box in lower left corner
+        # Create info box in lower right corner (moved to avoid compass in lower left)
         box_width = 250
         box_height = 140
-        box_x = 20
+        box_x = self.map_renderer.width - box_width - 20
         box_y = self.map_renderer.height - box_height - 20
 
-        # Draw box background with border
-        draw.rectangle([box_x, box_y, box_x + box_width, box_y + box_height],
-                       fill=255, outline=0, width=2)
+        # Draw rounded box background with border
+        self._draw_rounded_rectangle(
+            draw,
+            [box_x, box_y, box_x + box_width, box_y + box_height],
+            radius=10,
+            fill=255,
+            outline=0,
+            width=2
+        )
 
         # GPS information
         y_pos = box_y + 10
@@ -1585,6 +1612,200 @@ class NavigationSystem:
             self.db.close()
 
         logger.info("Navigation system shutdown complete")
+
+
+class MBTilesManager:
+    """Manages multiple MBTiles files for multi-regional support"""
+
+    def __init__(self, assets_folder, max_open_files=3, cache_timeout=300):
+        self.assets_folder = assets_folder
+        self.max_open_files = max_open_files
+        self.cache_timeout = cache_timeout
+        self.available_files = self._scan_assets_folder()
+        self.open_files = {}  # filename: (reader, last_used)
+        self.current_file = None
+        self.current_reader = None
+
+        # Load all metadata on startup
+        self._load_all_metadata()
+
+    def _scan_assets_folder(self):
+        """Scan assets folder for MBTiles files"""
+        files = {}
+        for file in Path(self.assets_folder).glob("*.mbtiles"):
+            files[str(file.name)] = {}
+        logger.info(f"Found {len(files)} MBTiles files in {self.assets_folder}")
+        return files
+
+    def _load_all_metadata(self):
+        """Load metadata for all available files"""
+        for filename in self.available_files:
+            try:
+                reader = self._get_or_open_file(filename)
+                if reader:
+                    metadata = reader.get_metadata()
+                    bounds = self._parse_bounds(metadata.get('bounds'))
+                    self.available_files[filename]['metadata'] = metadata
+                    self.available_files[filename]['bounds'] = bounds
+                    self.available_files[filename]['name'] = metadata.get('name', filename)
+                    logger.info(f"Loaded metadata for {filename}: {metadata.get('name')}, bounds: {bounds}")
+                else:
+                    logger.warning(f"Could not open {filename} to load metadata")
+            except Exception as e:
+                logger.error(f"Error loading metadata for {filename}: {e}")
+
+    def _parse_bounds(self, bounds_string):
+        """Parse bounds string to dictionary"""
+        if not bounds_string:
+            return None
+
+        try:
+            min_lon, min_lat, max_lon, max_lat = map(float, bounds_string.split(','))
+            return {
+                'min_lat': min_lat,
+                'min_lon': min_lon,
+                'max_lat': max_lat,
+                'max_lon': max_lon
+            }
+        except Exception as e:
+            logger.warning(f"Could not parse bounds string: {bounds_string} - {e}")
+            return None
+
+    def _check_coordinates_in_file(self, filename, lat, lon):
+        """Check if coordinates are within the bounds of a file"""
+        file_info = self.available_files.get(filename)
+        if not file_info:
+            return False
+
+        bounds = file_info.get('bounds')
+        return self._coordinates_in_bounds(lat, lon, bounds)
+
+    def _coordinates_in_bounds(self, lat, lon, bounds):
+        """Check if coordinates are within bounds with better logging"""
+        if not bounds:
+            return False
+
+        in_bounds = (bounds['min_lat'] <= lat <= bounds['max_lat'] and
+                     bounds['min_lon'] <= lon <= bounds['max_lon'])
+
+        logger.debug(f"Coordinate check: {lat:.4f},{lon:.4f} in bounds "
+                     f"[{bounds['min_lat']:.4f},{bounds['min_lon']:.4f}] to "
+                     f"[{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}]: {in_bounds}")
+
+        return in_bounds
+
+    def _get_or_open_file(self, filename):
+        """Get reader from open files or open new reader"""
+        if filename in self.open_files:
+            reader, last_used = self.open_files[filename]
+            self.open_files[filename] = (reader, time.time())  # Update last used time
+            return reader
+        else:
+            try:
+                from mbtiles import MBTiles
+                file_path = Path(self.assets_folder) / filename
+                reader = MBTiles(str(file_path))
+                self._add_file_to_cache(filename, reader)
+                return reader
+            except Exception as e:
+                logger.error(f"Could not open MBTiles file: {filename} - {e}")
+                return None
+
+    def _add_file_to_cache(self, filename, reader):
+        """Add file to cache, close oldest if over max_open_files"""
+        if len(self.open_files) >= self.max_open_files:
+            self._close_oldest_file()
+        self.open_files[filename] = (reader, time.time())
+
+    def _close_oldest_file(self):
+        """Close the least recently used file"""
+        if not self.open_files:
+            return
+
+        oldest_file = None
+        oldest_time = time.time()
+
+        for filename, (reader, last_used) in self.open_files.items():
+            if last_used < oldest_time:
+                oldest_time = last_used
+                oldest_file = filename
+
+        if oldest_file:
+            try:
+                self.open_files[oldest_file][0].close()
+                del self.open_files[oldest_file]
+                logger.info(f"Closed oldest file: {oldest_file}")
+            except Exception as e:
+                logger.error(f"Error closing file: {oldest_file} - {e}")
+
+    def get_available_files(self):
+        """Get list of available files"""
+        return self.available_files
+
+    def get_current_file_info(self):
+        """Get info for current file"""
+        if self.current_file:
+            return self.available_files.get(self.current_file)
+        return None
+
+    def list_available_regions(self):
+        """List available regions for debugging"""
+        logger.info("Available regions:")
+        for filename, file_info in self.available_files.items():
+            bounds = file_info.get('bounds')
+            if bounds:
+                logger.info(
+                    f"  {filename}: [{bounds['min_lat']:.4f},{bounds['min_lon']:.4f}] to [{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}]")
+            else:
+                logger.warning(f"  {filename}: No bounds")
+
+    def get_reader_for_coordinates(self, lat, lon):
+        """Get the appropriate MBTiles reader for given coordinates"""
+        logger.info(f"Looking for map covering coordinates: {lat:.4f}, {lon:.4f}")
+
+        # First check if current file still contains coordinates
+        if self.current_file and self.current_reader:
+            if self._check_coordinates_in_file(self.current_file, lat, lon):
+                # Update last used time
+                if self.current_file in self.open_files:
+                    self.open_files[self.current_file] = (self.current_reader, time.time())
+                logger.debug(f"Coordinates still in current file: {self.current_file}")
+                return self.current_reader
+
+        # Search for file containing coordinates
+        for filename, file_info in self.available_files.items():
+            bounds = file_info.get('bounds')
+            if bounds:
+                logger.info(f"Checking {filename}: bounds {bounds}")
+                if self._coordinates_in_bounds(lat, lon, bounds):
+                    logger.info(f"Found matching map: {filename} for coordinates {lat:.4f}, {lon:.4f}")
+                    reader = self._get_or_open_file(filename)
+                    if reader:
+                        self.current_file = filename
+                        self.current_reader = reader
+                        return reader
+            else:
+                logger.warning(f"No bounds found for {filename}")
+
+        # No file found containing coordinates
+        logger.warning(f"No MBTiles file found for coordinates {lat:.4f}, {lon:.4f}")
+        logger.info("Available regions:")
+        for filename, file_info in self.available_files.items():
+            bounds = file_info.get('bounds')
+            if bounds:
+                logger.info(
+                    f"  {filename}: [{bounds['min_lat']:.4f},{bounds['min_lon']:.4f}] to [{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}]")
+        return None
+
+    def close_all(self):
+        """Close all open files"""
+        for filename, (reader, last_used) in list(self.open_files.items()):
+            try:
+                reader.close()
+                del self.open_files[filename]
+                logger.info(f"Closed file: {filename}")
+            except Exception as e:
+                logger.error(f"Error closing file: {filename} - {e}")
 
 
 def main():
