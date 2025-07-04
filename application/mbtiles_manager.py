@@ -64,6 +64,8 @@ class MBTilesManager:
 
     def get_reader_for_coordinates(self, lat, lon):
         """Get the appropriate MBTiles reader for given coordinates"""
+        logger.debug(f"Looking for map covering coordinates: {lat:.4f}, {lon:.4f}")
+
         # First check if current file still contains coordinates
         if self.current_file and self.current_reader:
             if self._check_coordinates_in_file(self.current_file, lat, lon):
@@ -75,16 +77,22 @@ class MBTilesManager:
 
         # Search for file containing coordinates
         for filename, file_info in self.available_files.items():
-            if self._coordinates_in_bounds(lat, lon, file_info.get('bounds')):
-                logger.info(f"Switching to MBTiles file: {filename} for coordinates {lat:.4f}, {lon:.4f}")
-                reader = self._get_or_open_file(filename)
-                if reader:
-                    self.current_file = filename
-                    self.current_reader = reader
-                    return reader
+            bounds = file_info.get('bounds')
+            if bounds:
+                logger.debug(f"Checking {filename}: bounds {bounds}")
+                if self._coordinates_in_bounds(lat, lon, bounds):
+                    logger.info(f"Found matching map: {filename} for coordinates {lat:.4f}, {lon:.4f}")
+                    reader = self._get_or_open_file(filename)
+                    if reader:
+                        self.current_file = filename
+                        self.current_reader = reader
+                        return reader
+            else:
+                logger.warning(f"No bounds found for {filename}")
 
         # No file found containing coordinates
         logger.warning(f"No MBTiles file found for coordinates {lat:.4f}, {lon:.4f}")
+        logger.info(f"Available files: {list(self.available_files.keys())}")
         return None
 
     def _check_coordinates_in_file(self, filename, lat, lon):
@@ -95,12 +103,18 @@ class MBTilesManager:
         return self._coordinates_in_bounds(lat, lon, file_info.get('bounds'))
 
     def _coordinates_in_bounds(self, lat, lon, bounds):
-        """Check if coordinates are within bounds"""
+        """Check if coordinates are within bounds with better logging"""
         if not bounds:
             return False
 
-        return (bounds['min_lat'] <= lat <= bounds['max_lat'] and
-                bounds['min_lon'] <= lon <= bounds['max_lon'])
+        in_bounds = (bounds['min_lat'] <= lat <= bounds['max_lat'] and
+                     bounds['min_lon'] <= lon <= bounds['max_lon'])
+
+        logger.debug(f"Coordinate check: {lat:.4f},{lon:.4f} in bounds "
+                     f"[{bounds['min_lat']:.4f},{bounds['min_lat']:.4f}] to "
+                     f"[{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}]: {in_bounds}")
+
+        return in_bounds
 
     def _get_or_open_file(self, filename):
         """Get reader for file, opening if necessary"""
@@ -209,3 +223,16 @@ class MBTilesManager:
         self.current_file = None
         self.current_reader = None
         logger.info("Closed all MBTiles files")
+
+    def list_available_regions(self):
+        """List all available regions with their coverage"""
+        logger.info("Available MBTiles regions:")
+        for filename, file_info in self.available_files.items():
+            bounds = file_info.get('bounds')
+            name = file_info.get('name', filename)
+            if bounds:
+                logger.info(f"  {name} ({filename}): "
+                            f"[{bounds['min_lat']:.4f},{bounds['min_lon']:.4f}] to "
+                            f"[{bounds['max_lat']:.4f},{bounds['max_lon']:.4f}]")
+            else:
+                logger.info(f"  {name} ({filename}): No bounds information")
