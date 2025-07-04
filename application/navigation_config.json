@@ -2,33 +2,26 @@
   "default_zoom": 14,
   "min_zoom": 8,
   "max_zoom": 18,
-  "update_interval": 30,
-  "button_pins": {
-    "zoom_in": 16,
-    "zoom_out": 20,
-    "button3": 21,
-    "button4": 26
+  "display_update_interval": 5,
+  "sync_interval": 300,
+  "logbook_interval": 60,
+  "assets_folder": "/opt/elcano/assets",
+  "gps_port": "/dev/ttyAMA0",
+  "gps_baudrate": 9600,
+  "i2c_bus": 1,
+  "buttons": {
+    "up": 17,
+    "down": 4,
+    "left": 27,
+    "right": 2,
+    "center": 3
   },
-  "gps_settings": {
-    "port": "/dev/ttyAMA0",
-    "baudrate": 9600,
-    "speed_change_threshold": 2.0,
-    "heading_change_threshold": 15.0
-  },
-  "display_settings": {
-    "contrast_enhancement": 1.5,
-    "threshold": 128
-  },
-  "sync_settings": {
-    "api_base_url": "https://api.elcanonav.com",
-    "auto_sync_interval": 300,
-    "max_queue_size": 1000,
-    "batch_size": 100
-  },
-  "assets_folder": "/opt/elcano/assets/",
-  "mbtiles_settings": {
-    "max_open_files": 3,
-    "cache_timeout": 300,
-    "auto_switch": true
+  "display": {
+    "width": 800,
+    "height": 480,
+    "rst_pin": 17,
+    "dc_pin": 25,
+    "cs_pin": 8,
+    "busy_pin": 24
   }
 }

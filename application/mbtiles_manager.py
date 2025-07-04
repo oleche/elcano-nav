@@ -1,287 +1,456 @@
 #!/usr/bin/env python3
 """
-MBTiles Manager for Multi-Regional Maps
-=======================================
-Manages multiple MBTiles files for different geographic regions.
+MBTiles Manager for GPS Navigation System
+========================================
+Enhanced manager for handling multiple regional MBTiles files with smart selection,
+fallback mechanisms, and comprehensive tile management.
 """
 
-import os
+import sqlite3
+import math
 import logging
-import time
+import os
 from pathlib import Path
-from mbtiles_to_png import MBTiles
+from PIL import Image
+from io import BytesIO
+import json
 
 logger = logging.getLogger(__name__)
 
 
-class MBTilesManager:
-    """Manager for multiple regional MBTiles files"""
+class MBTilesReader:
+    """Enhanced MBTiles file reader with smart tile handling"""
 
-    def __init__(self, assets_folder, max_open_files=3, cache_timeout=300):
-        self.assets_folder = Path(assets_folder)
-        self.max_open_files = max_open_files
-        self.cache_timeout = cache_timeout
+    def __init__(self, filepath):
+        self.filepath = filepath
+        self.filename = Path(filepath).name
+        self.conn = None
+        self.metadata = {}
+        self.bounds = None
+        self.min_zoom = 0
+        self.max_zoom = 18
+        self.center_lat = 0
+        self.center_lon = 0
+        self.name = self.filename
 
-        # File management
-        self.available_files = {}  # filename -> file_info
-        self.open_files = {}  # filename -> (reader, last_used_time)
-        self.current_file = None  # Currently active filename
-        self.current_reader = None  # Currently active reader
+        # Open and read metadata
+        self._open_database()
+        self._read_metadata()
 
-        # Initialize
-        self._scan_assets_folder()
-        self._load_file_metadata()
-
-        logger.info(f"MBTilesManager initialized with {len(self.available_files)} files")
-
-    def _scan_assets_folder(self):
-        """Scan assets folder for MBTiles files"""
-        if not self.assets_folder.exists():
-            logger.warning(f"Assets folder does not exist: {self.assets_folder}")
-            return
-
-        for mbtiles_file in self.assets_folder.glob("*.mbtiles"):
-            filename = mbtiles_file.name
-            self.available_files[filename] = {
-                'path': str(mbtiles_file),
-                'size': mbtiles_file.stat().st_size,
-                'modified': mbtiles_file.stat().st_mtime
-            }
-            logger.info(f"Found MBTiles file: {filename}")
-
-    def _load_file_metadata(self):
-        """Load metadata for all available files"""
-        for filename in list(self.available_files.keys()):
-            try:
-                file_info = self.available_files[filename]
-                reader = self._open_file(filename)
-
-                if reader:
-                    metadata = reader.get_metadata()
-                    bounds_str = metadata.get('bounds')
-
-                    if bounds_str:
-                        bounds = self._parse_bounds(bounds_str)
-                        file_info['bounds'] = bounds
-                        file_info['metadata'] = metadata
-                        file_info['name'] = metadata.get('name', filename.replace('.mbtiles', ''))
-
-                        logger.info(f"Loaded metadata for {filename}: {file_info['name']}")
-                        logger.debug(f"  Bounds: {bounds}")
-                    else:
-                        logger.warning(f"No bounds found in {filename}")
-
-                    # Close immediately after loading metadata
-                    reader.close()
-                    if filename in self.open_files:
-                        del self.open_files[filename]
-
-            except Exception as e:
-                logger.error(f"Error loading metadata for {filename}: {e}")
-                # Remove problematic file from available files
-                del self.available_files[filename]
-
-    def _parse_bounds(self, bounds_str):
-        """Parse bounds string from metadata"""
+    def _open_database(self):
+        """Open SQLite database connection"""
         try:
-            # Bounds format: "min_lon,min_lat,max_lon,max_lat"
-            parts = bounds_str.split(',')
-            if len(parts) == 4:
-                return {
-                    'min_lon': float(parts[0]),
-                    'min_lat': float(parts[1]),
-                    'max_lon': float(parts[2]),
-                    'max_lat': float(parts[3])
-                }
+            self.conn = sqlite3.connect(self.filepath)
+            self.conn.row_factory = sqlite3.Row
+            logger.debug(f"Opened MBTiles file: {self.filename}")
         except Exception as e:
-            logger.error(f"Error parsing bounds '{bounds_str}': {e}")
-        return None
+            logger.error(f"Failed to open MBTiles file {self.filepath}: {e}")
+            raise
 
-    def _coordinates_in_bounds(self, lat, lon, bounds):
-        """Check if coordinates are within bounds"""
-        if not bounds:
+    def _read_metadata(self):
+        """Read metadata from MBTiles file"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT name, value FROM metadata")
+
+            for row in cursor.fetchall():
+                self.metadata[row['name']] = row['value']
+
+            # Parse important metadata
+            if 'bounds' in self.metadata:
+                bounds_str = self.metadata['bounds']
+                bounds = [float(x) for x in bounds_str.split(',')]
+                self.bounds = {
+                    'west': bounds[0],
+                    'south': bounds[1],
+                    'east': bounds[2],
+                    'north': bounds[3]
+                }
+
+                # Calculate center
+                self.center_lat = (bounds[1] + bounds[3]) / 2
+                self.center_lon = (bounds[0] + bounds[2]) / 2
+
+            if 'minzoom' in self.metadata:
+                self.min_zoom = int(self.metadata['minzoom'])
+
+            if 'maxzoom' in self.metadata:
+                self.max_zoom = int(self.metadata['maxzoom'])
+
+            if 'name' in self.metadata:
+                self.name = self.metadata['name']
+
+            logger.debug(f"MBTiles metadata loaded for {self.filename}: "
+                         f"bounds={self.bounds}, zoom={self.min_zoom}-{self.max_zoom}")
+
+        except Exception as e:
+            logger.warning(f"Could not read metadata from {self.filename}: {e}")
+
+    def contains_coordinates(self, lat, lon):
+        """Check if coordinates are within this MBTiles bounds"""
+        if not self.bounds:
             return False
 
-        return (bounds['min_lat'] <= lat <= bounds['max_lat'] and
-                bounds['min_lon'] <= lon <= bounds['max_lon'])
+        return (self.bounds['south'] <= lat <= self.bounds['north'] and
+                self.bounds['west'] <= lon <= self.bounds['east'])
 
-    def _open_file(self, filename):
-        """Open an MBTiles file"""
+    def get_distance_to_center(self, lat, lon):
+        """Calculate distance from coordinates to center of this MBTiles region"""
+        # Simple distance calculation
+        lat_diff = lat - self.center_lat
+        lon_diff = lon - self.center_lon
+        return math.sqrt(lat_diff ** 2 + lon_diff ** 2)
+
+    def deg2num(self, lat_deg, lon_deg, zoom):
+        """Convert lat/lon to tile numbers"""
+        lat_rad = math.radians(lat_deg)
+        n = 2.0 ** zoom
+        x = int((lon_deg + 180.0) / 360.0 * n)
+        y = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+        return (x, y)
+
+    def num2deg(self, x, y, zoom):
+        """Convert tile numbers to lat/lon"""
+        n = 2.0 ** zoom
+        lon_deg = x / n * 360.0 - 180.0
+        lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / n)))
+        lat_deg = math.degrees(lat_rad)
+        return (lat_deg, lon_deg)
+
+    def get_tile(self, z, x, y):
+        """Get tile data from MBTiles file"""
         try:
-            file_info = self.available_files.get(filename)
-            if not file_info:
+            cursor = self.conn.cursor()
+            # MBTiles uses TMS scheme, need to flip Y coordinate
+            tms_y = (2 ** z - 1) - y
+            cursor.execute("SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+                           (z, x, tms_y))
+            row = cursor.fetchone()
+
+            if row:
+                return row['tile_data']
+            else:
                 return None
 
-            reader = MBTiles(file_info['path'])
-            return reader
+        except Exception as e:
+            logger.debug(f"Error getting tile {z}/{x}/{y}: {e}")
+            return None
+
+    def get_available_zoom_levels(self):
+        """Get list of available zoom levels"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level")
+            return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting zoom levels: {e}")
+            return list(range(self.min_zoom, self.max_zoom + 1))
+
+    def find_best_zoom(self, target_zoom):
+        """Find the best available zoom level for target zoom"""
+        available_zooms = self.get_available_zoom_levels()
+
+        if target_zoom in available_zooms:
+            return target_zoom
+
+        # Find closest zoom level
+        closest_zoom = min(available_zooms, key=lambda x: abs(x - target_zoom))
+        return closest_zoom
+
+    def generate_composite_image(self, center_lat, center_lon, zoom, width, height,
+                                 use_fallback=True, crop_to_size=True):
+        """Generate composite image from tiles with enhanced fallback handling"""
+        try:
+            # Find best available zoom
+            actual_zoom = self.find_best_zoom(zoom)
+            zoom_adjusted = actual_zoom != zoom
+
+            # Calculate tile coverage needed
+            center_x, center_y = self.deg2num(center_lat, center_lon, actual_zoom)
+
+            # Calculate how many tiles we need
+            tile_size = 256
+            tiles_x = math.ceil(width / tile_size) + 1
+            tiles_y = math.ceil(height / tile_size) + 1
+
+            # Ensure odd number of tiles for centering
+            if tiles_x % 2 == 0:
+                tiles_x += 1
+            if tiles_y % 2 == 0:
+                tiles_y += 1
+
+            # Calculate tile range
+            half_tiles_x = tiles_x // 2
+            half_tiles_y = tiles_y // 2
+
+            start_x = center_x - half_tiles_x
+            end_x = center_x + half_tiles_x + 1
+            start_y = center_y - half_tiles_y
+            end_y = center_y + half_tiles_y + 1
+
+            # Create composite image
+            composite_width = tiles_x * tile_size
+            composite_height = tiles_y * tile_size
+            composite = Image.new('RGB', (composite_width, composite_height), (240, 240, 240))
+
+            tiles_found = 0
+            tiles_missing = 0
+
+            # Load and place tiles
+            for ty in range(start_y, end_y):
+                for tx in range(start_x, end_x):
+                    tile_data = self.get_tile(actual_zoom, tx, ty)
+
+                    if tile_data:
+                        try:
+                            tile_image = Image.open(BytesIO(tile_data))
+
+                            # Calculate position in composite
+                            pos_x = (tx - start_x) * tile_size
+                            pos_y = (ty - start_y) * tile_size
+
+                            composite.paste(tile_image, (pos_x, pos_y))
+                            tiles_found += 1
+
+                        except Exception as e:
+                            logger.debug(f"Error loading tile image {actual_zoom}/{tx}/{ty}: {e}")
+                            self._draw_placeholder_tile(composite, (tx - start_x) * tile_size,
+                                                        (ty - start_y) * tile_size, tile_size)
+                            tiles_missing += 1
+                    else:
+                        # Create placeholder tile
+                        if use_fallback:
+                            self._draw_placeholder_tile(composite, (tx - start_x) * tile_size,
+                                                        (ty - start_y) * tile_size, tile_size)
+                        tiles_missing += 1
+
+            # Crop to requested size if needed
+            if crop_to_size and (composite.width != width or composite.height != height):
+                # Calculate crop area to center the image
+                left = (composite.width - width) // 2
+                top = (composite.height - height) // 2
+                right = left + width
+                bottom = top + height
+
+                composite = composite.crop((left, top, right, bottom))
+
+            # Convert to bytes
+            output = BytesIO()
+            composite.save(output, format='PNG')
+            image_data = output.getvalue()
+
+            # Prepare metadata
+            metadata = {
+                'zoom_requested': zoom,
+                'actual_zoom': actual_zoom,
+                'zoom_adjusted': zoom_adjusted,
+                'tiles_found': tiles_found,
+                'tiles_missing': tiles_missing,
+                'total_tiles': tiles_found + tiles_missing,
+                'availability_ratio': tiles_found / (tiles_found + tiles_missing) if (
+                                                                                                 tiles_found + tiles_missing) > 0 else 0,
+                'center_lat': center_lat,
+                'center_lon': center_lon,
+                'image_width': width,
+                'image_height': height
+            }
+
+            return image_data, metadata
 
         except Exception as e:
-            logger.error(f"Error opening {filename}: {e}")
-            return None
+            logger.error(f"Error generating composite image: {e}")
+            # Return error image
+            error_image = Image.new('RGB', (width, height), (200, 200, 200))
+            output = BytesIO()
+            error_image.save(output, format='PNG')
+            return output.getvalue(), {'error': str(e)}
 
-    def _get_cached_reader(self, filename):
-        """Get reader from cache or open new one"""
-        current_time = time.time()
+    def _draw_placeholder_tile(self, image, x, y, size):
+        """Draw a placeholder tile on the composite image"""
+        from PIL import ImageDraw
 
-        # Check if file is already open
-        if filename in self.open_files:
-            reader, last_used = self.open_files[filename]
+        # Create a light gray tile with border
+        draw = ImageDraw.Draw(image)
 
-            # Check if cache is still valid
-            if current_time - last_used < self.cache_timeout:
-                # Update last used time
-                self.open_files[filename] = (reader, current_time)
-                return reader
-            else:
-                # Cache expired, close and remove
-                try:
-                    reader.close()
-                except:
-                    pass
-                del self.open_files[filename]
+        # Fill with light gray
+        draw.rectangle([x, y, x + size - 1, y + size - 1], fill=(220, 220, 220))
 
-        # Open new reader
-        reader = self._open_file(filename)
-        if reader:
-            # Manage cache size
-            if len(self.open_files) >= self.max_open_files:
-                self._close_oldest_file()
+        # Draw border
+        draw.rectangle([x, y, x + size - 1, y + size - 1], outline=(180, 180, 180), width=1)
 
-            # Add to cache
-            self.open_files[filename] = (reader, current_time)
+        # Draw diagonal lines
+        draw.line([x, y, x + size - 1, y + size - 1], fill=(180, 180, 180), width=1)
+        draw.line([x + size - 1, y, x, y + size - 1], fill=(180, 180, 180), width=1)
 
-        return reader
+    def close(self):
+        """Close database connection"""
+        if self.conn:
+            self.conn.close()
+            self.conn = None
 
-    def _close_oldest_file(self):
-        """Close the least recently used file"""
-        if not self.open_files:
+
+class MBTilesManager:
+    """Enhanced manager for multiple MBTiles files with smart selection"""
+
+    def __init__(self, assets_folder):
+        self.assets_folder = Path(assets_folder)
+        self.readers = {}
+        self.current_reader = None
+        self.file_list = []
+        self.current_file_index = 0
+
+        # Ensure assets folder exists
+        self.assets_folder.mkdir(parents=True, exist_ok=True)
+
+        # Load all MBTiles files
+        self._load_mbtiles_files()
+
+        logger.info(f"MBTilesManager initialized with {len(self.readers)} files")
+
+    def _load_mbtiles_files(self):
+        """Load all MBTiles files from assets folder"""
+        mbtiles_files = list(self.assets_folder.glob("*.mbtiles"))
+
+        if not mbtiles_files:
+            logger.warning(f"No MBTiles files found in {self.assets_folder}")
             return
 
-        oldest_file = None
-        oldest_time = time.time()
-
-        for filename, (reader, last_used) in self.open_files.items():
-            if last_used < oldest_time:
-                oldest_time = last_used
-                oldest_file = filename
-
-        if oldest_file:
+        for filepath in mbtiles_files:
             try:
-                reader, _ = self.open_files[oldest_file]
-                reader.close()
-                del self.open_files[oldest_file]
-                logger.debug(f"Closed oldest file: {oldest_file}")
+                reader = MBTilesReader(str(filepath))
+                self.readers[filepath.name] = reader
+                self.file_list.append(filepath.name)
+                logger.info(f"Loaded MBTiles file: {filepath.name} ({reader.name})")
+
             except Exception as e:
-                logger.error(f"Error closing {oldest_file}: {e}")
+                logger.error(f"Failed to load MBTiles file {filepath}: {e}")
+
+        # Set first file as current if available
+        if self.file_list:
+            self.current_reader = self.readers[self.file_list[0]]
+            logger.info(f"Set current MBTiles file: {self.file_list[0]}")
 
     def get_reader_for_coordinates(self, lat, lon):
-        """Get the appropriate MBTiles reader for given coordinates"""
-        logger.debug(f"Looking for map covering {lat:.4f}, {lon:.4f}")
-
-        # Check if current reader still covers the coordinates
-        if (self.current_reader and self.current_file and
-                self.current_file in self.available_files):
-
-            file_info = self.available_files[self.current_file]
-            bounds = file_info.get('bounds')
-
-            if bounds and self._coordinates_in_bounds(lat, lon, bounds):
-                logger.debug(f"Current file {self.current_file} still covers coordinates")
-                return self.current_reader
-
-        # Search for appropriate file
-        best_file = None
-        for filename, file_info in self.available_files.items():
-            bounds = file_info.get('bounds')
-            if bounds and self._coordinates_in_bounds(lat, lon, bounds):
-                best_file = filename
-                logger.info(f"Found matching map: {filename} for {lat:.4f}, {lon:.4f}")
-                break
-
-        if not best_file:
-            logger.warning(f"No map file found for coordinates {lat:.4f}, {lon:.4f}")
-            self._log_available_regions()
+        """Get the best MBTiles reader for given coordinates"""
+        if not self.readers:
             return None
 
-        # Get reader for the best file
-        reader = self._get_cached_reader(best_file)
-        if reader:
-            self.current_reader = reader
-            self.current_file = best_file
-            return reader
+        # First, try to find a reader that contains the coordinates
+        containing_readers = []
+        for filename, reader in self.readers.items():
+            if reader.contains_coordinates(lat, lon):
+                containing_readers.append((filename, reader))
 
-        return None
+        if containing_readers:
+            # If multiple readers contain the coordinates, pick the first one
+            # In the future, we could add logic to pick the best one based on zoom levels, etc.
+            selected_filename, selected_reader = containing_readers[0]
 
-    def _log_available_regions(self):
-        """Log available regions for debugging"""
-        logger.info("Available map regions:")
-        for filename, file_info in self.available_files.items():
-            bounds = file_info.get('bounds')
-            name = file_info.get('name', filename)
-            if bounds:
-                logger.info(f"  {name}: [{bounds['min_lat']:.2f},{bounds['min_lon']:.2f}] "
-                            f"to [{bounds['max_lat']:.2f},{bounds['max_lon']:.2f}]")
-            else:
-                logger.info(f"  {name}: No bounds available")
+            # Update current reader if it's different
+            if self.current_reader != selected_reader:
+                self.current_reader = selected_reader
+                self.current_file_index = self.file_list.index(selected_filename)
+                logger.info(f"Auto-switched to MBTiles file: {selected_filename} for coordinates {lat:.4f}, {lon:.4f}")
 
-    def get_available_files(self):
-        """Get dictionary of available files with metadata"""
-        return self.available_files.copy()
+            return selected_reader
+
+        # If no reader contains the coordinates, find the closest one
+        closest_reader = None
+        min_distance = float('inf')
+
+        for filename, reader in self.readers.items():
+            distance = reader.get_distance_to_center(lat, lon)
+            if distance < min_distance:
+                min_distance = distance
+                closest_reader = reader
+
+        if closest_reader and self.current_reader != closest_reader:
+            # Find filename for the closest reader
+            for filename, reader in self.readers.items():
+                if reader == closest_reader:
+                    self.current_reader = closest_reader
+                    self.current_file_index = self.file_list.index(filename)
+                    logger.info(
+                        f"Auto-switched to closest MBTiles file: {filename} for coordinates {lat:.4f}, {lon:.4f}")
+                    break
+
+        return closest_reader or self.current_reader
+
+    def switch_to_next_file(self):
+        """Switch to next MBTiles file"""
+        if len(self.file_list) <= 1:
+            return False
+
+        self.current_file_index = (self.current_file_index + 1) % len(self.file_list)
+        filename = self.file_list[self.current_file_index]
+        self.current_reader = self.readers[filename]
+
+        logger.info(f"Switched to MBTiles file: {filename}")
+        return True
+
+    def switch_to_previous_file(self):
+        """Switch to previous MBTiles file"""
+        if len(self.file_list) <= 1:
+            return False
+
+        self.current_file_index = (self.current_file_index - 1) % len(self.file_list)
+        filename = self.file_list[self.current_file_index]
+        self.current_reader = self.readers[filename]
+
+        logger.info(f"Switched to MBTiles file: {filename}")
+        return True
 
     def get_current_file_info(self):
-        """Get information about the currently selected file"""
-        if self.current_file and self.current_file in self.available_files:
-            info = self.available_files[self.current_file].copy()
-            info['filename'] = self.current_file
-            return info
-        return None
+        """Get information about current MBTiles file"""
+        if not self.current_reader:
+            return None
 
-    def list_available_regions(self):
-        """List all available regions"""
-        logger.info("=== Available Map Regions ===")
-        for filename, file_info in self.available_files.items():
-            name = file_info.get('name', filename.replace('.mbtiles', ''))
-            bounds = file_info.get('bounds')
-            size_mb = file_info.get('size', 0) / (1024 * 1024)
+        filename = self.file_list[self.current_file_index] if self.file_list else "Unknown"
 
-            logger.info(f"Region: {name}")
-            logger.info(f"  File: {filename} ({size_mb:.1f} MB)")
+        return {
+            'filename': filename,
+            'name': self.current_reader.name,
+            'bounds': self.current_reader.bounds,
+            'min_zoom': self.current_reader.min_zoom,
+            'max_zoom': self.current_reader.max_zoom,
+            'center_lat': self.current_reader.center_lat,
+            'center_lon': self.current_reader.center_lon,
+            'metadata': self.current_reader.metadata
+        }
 
-            if bounds:
-                logger.info(f"  Coverage: {bounds['min_lat']:.4f},{bounds['min_lon']:.4f} "
-                            f"to {bounds['max_lat']:.4f},{bounds['max_lon']:.4f}")
-            else:
-                logger.info("  Coverage: Unknown (no bounds)")
+    def get_available_files(self):
+        """Get list of available MBTiles files with their info"""
+        files_info = {}
+        for filename, reader in self.readers.items():
+            files_info[filename] = {
+                'name': reader.name,
+                'bounds': reader.bounds,
+                'min_zoom': reader.min_zoom,
+                'max_zoom': reader.max_zoom,
+                'center_lat': reader.center_lat,
+                'center_lon': reader.center_lon
+            }
+        return files_info
 
-            logger.info("")
-
-    def close_all(self):
-        """Close all open files"""
-        for filename, (reader, _) in list(self.open_files.items()):
-            try:
-                reader.close()
-                logger.debug(f"Closed {filename}")
-            except Exception as e:
-                logger.error(f"Error closing {filename}: {e}")
-
-        self.open_files.clear()
+    def cleanup(self):
+        """Close all database connections"""
+        for reader in self.readers.values():
+            reader.close()
+        self.readers.clear()
+        self.file_list.clear()
         self.current_reader = None
-        self.current_file = None
-
-        logger.info("All MBTiles files closed")
+        logger.info("MBTilesManager cleanup completed")
 
 
 def main():
     """Test the MBTiles manager"""
     import sys
 
-    if len(sys.argv) < 4:
-        print("Usage: python mbtiles_manager.py <assets_folder> <lat> <lon>")
-        sys.exit(1)
+    if len(sys.argv) != 2:
+        print("Usage: python mbtiles_manager.py <assets_folder>")
+        return 1
 
     assets_folder = sys.argv[1]
-    lat = float(sys.argv[2])
-    lon = float(sys.argv[3])
 
     # Configure logging
     logging.basicConfig(level=logging.INFO)
@@ -290,31 +459,50 @@ def main():
         # Create manager
         manager = MBTilesManager(assets_folder)
 
-        # List available regions
-        manager.list_available_regions()
+        if not manager.readers:
+            print("No MBTiles files found")
+            return 1
 
-        # Find reader for coordinates
-        reader = manager.get_reader_for_coordinates(lat, lon)
+        # Test coordinates (Amsterdam)
+        test_lat, test_lon = 52.3676, 4.9041
+
+        print(f"Testing with coordinates: {test_lat}, {test_lon}")
+
+        # Get reader for coordinates
+        reader = manager.get_reader_for_coordinates(test_lat, test_lon)
 
         if reader:
-            print(f"\nFound reader for {lat}, {lon}")
-            current_info = manager.get_current_file_info()
-            print(f"Using: {current_info['name']} ({current_info['filename']})")
+            print(f"Selected reader: {reader.filename}")
+            print(f"Reader name: {reader.name}")
+            print(f"Bounds: {reader.bounds}")
+            print(f"Zoom range: {reader.min_zoom}-{reader.max_zoom}")
 
             # Test image generation
-            image_data, metadata = reader.generate_composite_image(lat, lon, 14, 800, 480)
-            print(f"Generated test image: {len(image_data)} bytes")
+            print("Generating test image...")
+            image_data, metadata = reader.generate_composite_image(
+                test_lat, test_lon, 14, 800, 480
+            )
+
+            print(f"Generated image: {len(image_data)} bytes")
             print(f"Metadata: {metadata}")
+
+            # Save test image
+            with open("test_output.png", "wb") as f:
+                f.write(image_data)
+            print("Test image saved as test_output.png")
+
         else:
-            print(f"No reader found for {lat}, {lon}")
+            print("No suitable reader found for coordinates")
 
         # Cleanup
-        manager.close_all()
+        manager.cleanup()
 
     except Exception as e:
         print(f"Error: {e}")
-        sys.exit(1)
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    exit(main())

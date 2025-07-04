@@ -555,7 +555,7 @@ class MapRenderer:
             "",
             "3. Configure WiFi settings and device key",
             "",
-            "4. The device will restart after configuration"
+            "4. Restart the device after configuration"
         ]
 
         for message in messages:
@@ -843,146 +843,133 @@ class MapRenderer:
             bbox = draw.textbbox((0, 0), direction, font=self.font_small)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-
             draw.text((text_x - text_width // 2, text_y - text_height // 2),
                       direction, fill=0, font=self.font_small)
 
-        # Heading indicator (if available or forced)
+        # Heading indicator (if we have valid heading data or forced)
         if heading > 0 or force_show:
             # Draw heading line
-            head_x = rose_x + int((rose_radius - 5) * math.sin(math.radians(heading)))
-            head_y = rose_y - int((rose_radius - 5) * math.cos(math.radians(heading)))
-
+            head_x = rose_x + int((rose_radius - 10) * math.sin(math.radians(heading)))
+            head_y = rose_y - int((rose_radius - 10) * math.cos(math.radians(heading)))
             draw.line([rose_x, rose_y, head_x, head_y], fill=0, width=3)
 
-            # Draw arrowhead
-            arrow_size = 8
-            arrow_angle = math.radians(heading)
+            # Draw heading triangle
+            triangle_size = 8
+            triangle_x = rose_x + int((rose_radius - 5) * math.sin(math.radians(heading)))
+            triangle_y = rose_y - int((rose_radius - 5) * math.cos(math.radians(heading)))
 
-            # Calculate arrowhead points
-            arrow_x1 = head_x - arrow_size * math.sin(arrow_angle - 0.5)
-            arrow_y1 = head_y + arrow_size * math.cos(arrow_angle - 0.5)
-            arrow_x2 = head_x - arrow_size * math.sin(arrow_angle + 0.5)
-            arrow_y2 = head_y + arrow_size * math.cos(arrow_angle + 0.5)
+            # Calculate triangle points
+            angle_rad = math.radians(heading)
+            p1_x = triangle_x + int(triangle_size * math.sin(angle_rad))
+            p1_y = triangle_y - int(triangle_size * math.cos(angle_rad))
+            p2_x = triangle_x + int(triangle_size * math.sin(angle_rad + 2.618))  # 150 degrees
+            p2_y = triangle_y - int(triangle_size * math.cos(angle_rad + 2.618))
+            p3_x = triangle_x + int(triangle_size * math.sin(angle_rad - 2.618))  # -150 degrees
+            p3_y = triangle_y - int(triangle_size * math.cos(angle_rad - 2.618))
 
-            draw.polygon([head_x, head_y, arrow_x1, arrow_y1, arrow_x2, arrow_y2], fill=0)
+            draw.polygon([(p1_x, p1_y), (p2_x, p2_y), (p3_x, p3_y)], fill=0)
 
     def _draw_info_panel(self, draw, lat, lon, zoom, metadata):
         """Draw information panel in lower right corner with rounded corners"""
-        # Panel dimensions and position
-        panel_width = 200
+        panel_width = 280
         panel_height = 120
         panel_x = self.width - panel_width - 10
         panel_y = self.height - panel_height - 10
         corner_radius = 10
 
         # Draw rounded rectangle background
-        self._draw_rounded_rectangle(draw, panel_x, panel_y, panel_width, panel_height,
+        self._draw_rounded_rectangle(draw, panel_x, panel_y, panel_x + panel_width, panel_y + panel_height,
                                      corner_radius, fill=255, outline=0, width=2)
 
-        # Panel content
+        # Content
         y_offset = panel_y + 10
-        line_height = 15
 
         # Coordinates
-        coord_text = f"Lat: {lat:.4f}"
+        coord_text = f"Lat: {lat:.5f}"
         draw.text((panel_x + 10, y_offset), coord_text, fill=0, font=self.font_small)
-        y_offset += line_height
+        y_offset += 15
 
-        coord_text = f"Lon: {lon:.4f}"
+        coord_text = f"Lon: {lon:.5f}"
         draw.text((panel_x + 10, y_offset), coord_text, fill=0, font=self.font_small)
-        y_offset += line_height
+        y_offset += 15
 
-        # Zoom level
-        zoom_text = f"Zoom: {zoom}"
-        if metadata.get('zoom_adjusted'):
-            zoom_text += f" (adj: {metadata.get('zoom_actual')})"
+        # Zoom and region info
+        region_name = metadata.get('region_name', 'Unknown')
+        if len(region_name) > 25:
+            region_name = region_name[:22] + "..."
+
+        zoom_text = f"Zoom: {zoom} | {region_name}"
         draw.text((panel_x + 10, y_offset), zoom_text, fill=0, font=self.font_small)
-        y_offset += line_height
+        y_offset += 15
 
-        # Tile availability
-        if 'availability_ratio' in metadata:
-            avail_pct = metadata['availability_ratio'] * 100
-            avail_text = f"Tiles: {avail_pct:.0f}%"
-            draw.text((panel_x + 10, y_offset), avail_text, fill=0, font=self.font_small)
-            y_offset += line_height
+        # Tile info
+        tiles_found = metadata.get('tiles_found', 0)
+        tiles_missing = metadata.get('tiles_missing', 0)
+        availability = metadata.get('availability_ratio', 0)
 
-        # Current map file
-        if 'region_name' in metadata:
-            region_text = metadata['region_name'][:18]  # Truncate if too long
-            draw.text((panel_x + 10, y_offset), f"Map: {region_text}", fill=0, font=self.font_small)
-            y_offset += line_height
+        tile_text = f"Tiles: {tiles_found}/{tiles_found + tiles_missing} ({availability:.0%})"
+        draw.text((panel_x + 10, y_offset), tile_text, fill=0, font=self.font_small)
+        y_offset += 15
 
-        # Scale indicator
-        scale_text = self._calculate_scale_text(zoom)
-        draw.text((panel_x + 10, y_offset), scale_text, fill=0, font=self.font_small)
+        # Zoom adjustment info
+        if metadata.get('zoom_adjusted', False):
+            actual_zoom = metadata.get('actual_zoom', zoom)
+            zoom_adj_text = f"Using zoom {actual_zoom} (adjusted)"
+            draw.text((panel_x + 10, y_offset), zoom_adj_text, fill=0, font=self.font_small)
 
-    def _draw_rounded_rectangle(self, draw, x, y, width, height, radius, fill=None, outline=None, width_line=1):
+    def _draw_rounded_rectangle(self, draw, x1, y1, x2, y2, radius, fill=None, outline=None, width=1):
         """Draw a rounded rectangle"""
         # Draw the main rectangle
-        draw.rectangle([x + radius, y, x + width - radius, y + height], fill=fill, outline=outline, width=width_line)
-        draw.rectangle([x, y + radius, x + width, y + height - radius], fill=fill, outline=outline, width=width_line)
+        draw.rectangle([x1 + radius, y1, x2 - radius, y2], fill=fill, outline=outline, width=width)
+        draw.rectangle([x1, y1 + radius, x2, y2 - radius], fill=fill, outline=outline, width=width)
 
         # Draw the corners
-        draw.pieslice([x, y, x + 2 * radius, y + 2 * radius], 180, 270, fill=fill, outline=outline, width=width_line)
-        draw.pieslice([x + width - 2 * radius, y, x + width, y + 2 * radius], 270, 360, fill=fill, outline=outline,
-                      width=width_line)
-        draw.pieslice([x, y + height - 2 * radius, x + 2 * radius, y + height], 90, 180, fill=fill, outline=outline,
-                      width=width_line)
-        draw.pieslice([x + width - 2 * radius, y + height - 2 * radius, x + width, y + height], 0, 90, fill=fill,
-                      outline=outline, width=width_line)
+        draw.pieslice([x1, y1, x1 + 2 * radius, y1 + 2 * radius], 180, 270, fill=fill, outline=outline, width=width)
+        draw.pieslice([x2 - 2 * radius, y1, x2, y1 + 2 * radius], 270, 360, fill=fill, outline=outline, width=width)
+        draw.pieslice([x1, y2 - 2 * radius, x1 + 2 * radius, y2], 90, 180, fill=fill, outline=outline, width=width)
+        draw.pieslice([x2 - 2 * radius, y2 - 2 * radius, x2, y2], 0, 90, fill=fill, outline=outline, width=width)
 
-    def _calculate_scale_text(self, zoom):
-        """Calculate approximate scale for zoom level"""
-        # Approximate scale calculation (varies by latitude)
-        scales = {
-            10: "1:1M", 11: "1:500K", 12: "1:250K", 13: "1:125K",
-            14: "1:65K", 15: "1:32K", 16: "1:16K", 17: "1:8K", 18: "1:4K"
-        }
-        return f"Scale: {scales.get(zoom, '1:?K')}"
-
-    def render_waiting_screen(self, wifi_status=None, gps_status=None):
+    def render_waiting_screen(self, wifi_status=None):
         """Render waiting for GPS signal screen"""
         image = Image.new('L', (self.width, self.height), 255)
         draw = ImageDraw.Draw(image)
 
         # Draw status bar
-        self._draw_status_bar(draw, wifi_status, gps_status, 0, 0)
+        self._draw_status_bar(draw, wifi_status, None, 0, 0)
 
-        # Main message
-        message = "Waiting for GPS Signal..."
-        bbox = draw.textbbox((0, 0), message, font=self.font_large)
-        text_width = bbox[2] - bbox[0]
-        text_x = (self.width - text_width) // 2
-        draw.text((text_x, self.height // 2 - 50), message, fill=0, font=self.font_large)
+        # Main message with rounded corners
+        msg_width = 400
+        msg_height = 200
+        msg_x = (self.width - msg_width) // 2
+        msg_y = (self.height - msg_height) // 2
+        corner_radius = 15
 
-        # GPS status details
-        if gps_status:
-            sats = gps_status.get('satellites', 0)
-            fix_quality = gps_status.get('fix_quality', 0)
+        # Draw rounded rectangle background
+        self._draw_rounded_rectangle(draw, msg_x, msg_y, msg_x + msg_width, msg_y + msg_height,
+                                     corner_radius, fill=255, outline=0, width=3)
 
-            status_text = f"Satellites: {sats} | Fix Quality: {fix_quality}"
-            bbox = draw.textbbox((0, 0), status_text, font=self.font_medium)
-            text_width = bbox[2] - bbox[0]
-            text_x = (self.width - text_width) // 2
-            draw.text((text_x, self.height // 2), status_text, fill=0, font=self.font_medium)
+        # Title
+        title = "Waiting for GPS Signal"
+        bbox = draw.textbbox((0, 0), title, font=self.font_large)
+        title_width = bbox[2] - bbox[0]
+        title_x = (self.width - title_width) // 2
+        draw.text((title_x, msg_y + 40), title, fill=0, font=self.font_large)
 
         # Instructions
-        instruction = "Ensure clear view of sky for GPS reception"
-        bbox = draw.textbbox((0, 0), instruction, font=self.font_small)
-        text_width = bbox[2] - bbox[0]
-        text_x = (self.width - text_width) // 2
-        draw.text((text_x, self.height // 2 + 50), instruction, fill=0, font=self.font_small)
+        instructions = [
+            "• Ensure GPS antenna has clear sky view",
+            "• Initial GPS fix may take 1-5 minutes",
+            "• Check GPS module connections",
+            "• Press any button to continue"
+        ]
 
-        # Draw rounded rectangle around the waiting message
-        msg_bbox = draw.textbbox((text_x - 20, self.height // 2 - 70), message + "    ", font=self.font_large)
-        rect_x = msg_bbox[0] - 20
-        rect_y = msg_bbox[1] - 20
-        rect_width = msg_bbox[2] - msg_bbox[0] + 40
-        rect_height = 140
-
-        self._draw_rounded_rectangle(draw, rect_x, rect_y, rect_width, rect_height,
-                                     15, fill=None, outline=0, width_line=2)
+        y_pos = msg_y + 80
+        for instruction in instructions:
+            bbox = draw.textbbox((0, 0), instruction, font=self.font_small)
+            text_width = bbox[2] - bbox[0]
+            text_x = (self.width - text_width) // 2
+            draw.text((text_x, y_pos), instruction, fill=0, font=self.font_small)
+            y_pos += 25
 
         return image
 
@@ -998,318 +985,410 @@ class GPSNavigationSystem:
         self.display = EPaperDisplay()
         self.gps = GPSModule()
         self.gy511 = GY511()
-        self.wifi_manager = WiFiManager()
-        self.database = DatabaseManager()
-        self.sync_manager = SyncManager(self.database)
+        self.wifi = WiFiManager()
+        self.db = DatabaseManager()
 
         # Initialize MBTiles manager
         assets_folder = self.config.get('assets_folder', '/opt/elcano/assets')
         self.mbtiles_manager = MBTilesManager(assets_folder)
 
+        # Initialize sync manager
+        self.sync_manager = SyncManager(self.db)
+
         # Initialize map renderer
         self.map_renderer = MapRenderer(self.mbtiles_manager)
 
         # Initialize menu system
-        self.menu_system = MenuSystem(self.database, self.sync_manager)
+        self.menu = MenuSystem(self.db, self.sync_manager)
 
         # Initialize buttons
-        self._init_buttons()
+        self.button_up = Button(17)
+        self.button_down = Button(4)
+        self.button_left = Button(27)
+        self.button_right = Button(2)
+        self.button_center = Button(3)
+
+        # Setup button callbacks
+        self.button_up.when_pressed = self.on_button_up
+        self.button_down.when_pressed = self.on_button_down
+        self.button_left.when_pressed = self.on_button_left
+        self.button_right.when_pressed = self.on_button_right
+        self.button_center.when_pressed = self.on_button_center
 
         # State management
         self.current_zoom = self.config.get('default_zoom', 14)
+        self.min_zoom = self.config.get('min_zoom', 8)
+        self.max_zoom = self.config.get('max_zoom', 18)
         self.running = False
-        self.display_mode = 'map'  # 'map', 'menu', 'sync_setup'
-        self.last_gps_log_time = 0
-        self.gps_log_interval = self.config.get('gps_log_interval', 30)  # seconds
+        self.in_menu = False
+        self.last_display_update = 0
+        self.display_update_interval = self.config.get('display_update_interval', 5)
 
-        # Check sync configuration
-        self._check_sync_configuration()
+        # Sync timing
+        self.last_sync_attempt = 0
+        self.sync_interval = self.config.get('sync_interval', 300)  # 5 minutes
+
+        # Logbook management
+        self.last_logbook_entry = 0
+        self.logbook_interval = self.config.get('logbook_interval', 60)  # 1 minute
+
+        # Current trip
+        self.current_trip_id = None
+
+        # GY-511 heading integration
+        self._last_gy511_heading = None
+        self._gy511_update_time = 0
 
         logger.info("GPS Navigation System initialized")
 
     def _load_config(self, config_file):
         """Load configuration from JSON file"""
+        default_config = {
+            'default_zoom': 14,
+            'min_zoom': 8,
+            'max_zoom': 18,
+            'display_update_interval': 5,
+            'sync_interval': 300,
+            'logbook_interval': 60,
+            'assets_folder': '/opt/elcano/assets'
+        }
+
         try:
             with open(config_file, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+                # Merge with defaults
+                for key, value in default_config.items():
+                    if key not in config:
+                        config[key] = value
+                return config
         except Exception as e:
             logger.warning(f"Could not load config file {config_file}: {e}")
-            return {
-                'default_zoom': 14,
-                'assets_folder': '/opt/elcano/assets',
-                'gps_log_interval': 30,
-                'fallback_coordinates': [52.3676, 4.9041]  # Amsterdam
-            }
-
-    def _check_sync_configuration(self):
-        """Check if sync is properly configured"""
-        if not self.sync_manager.is_enabled():
-            logger.warning("Sync not enabled - no sync key configured")
-            self.display_mode = 'sync_setup'
-        elif not self.sync_manager.is_valid_sync_key():
-            logger.warning("Invalid sync key detected - showing setup screen")
-            self.display_mode = 'sync_setup'
-        else:
-            logger.info("Sync configuration valid")
-
-    def _init_buttons(self):
-        """Initialize GPIO buttons"""
-        try:
-            # Button assignments
-            self.btn_menu = Button(2, pull_up=True, bounce_time=0.1)
-            self.btn_zoom_in = Button(3, pull_up=True, bounce_time=0.1)
-            self.btn_zoom_out = Button(4, pull_up=True, bounce_time=0.1)
-            self.btn_select = Button(17, pull_up=True, bounce_time=0.1)
-
-            # Button event handlers
-            self.btn_menu.when_pressed = self._on_menu_button
-            self.btn_zoom_in.when_pressed = self._on_zoom_in
-            self.btn_zoom_out.when_pressed = self._on_zoom_out
-            self.btn_select.when_pressed = self._on_select_button
-
-            logger.info("Buttons initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize buttons: {e}")
-
-    def _on_menu_button(self):
-        """Handle menu button press"""
-        if self.display_mode == 'sync_setup':
-            # Retry sync key detection
-            self._check_sync_configuration()
-        elif self.display_mode == 'map':
-            self.display_mode = 'menu'
-            self.menu_system.reset()
-        elif self.display_mode == 'menu':
-            self.display_mode = 'map'
-
-        logger.info(f"Menu button pressed, mode: {self.display_mode}")
-
-    def _on_zoom_in(self):
-        """Handle zoom in button"""
-        if self.display_mode == 'map':
-            self.current_zoom = min(18, self.current_zoom + 1)
-            logger.info(f"Zoom in to {self.current_zoom}")
-        elif self.display_mode == 'menu':
-            self.menu_system.navigate_up()
-
-    def _on_zoom_out(self):
-        """Handle zoom out button"""
-        if self.display_mode == 'map':
-            self.current_zoom = max(10, self.current_zoom - 1)
-            logger.info(f"Zoom out to {self.current_zoom}")
-        elif self.display_mode == 'menu':
-            self.menu_system.navigate_down()
-
-    def _on_select_button(self):
-        """Handle select button"""
-        if self.display_mode == 'menu':
-            result = self.menu_system.select_current()
-            if result == 'exit_menu':
-                self.display_mode = 'map'
-            logger.info(f"Select button pressed in menu: {result}")
-        elif self.display_mode == 'sync_setup':
-            # Retry sync key detection
-            self._check_sync_configuration()
-
-    def _log_gps_position(self, gps_status):
-        """Log GPS position to database"""
-        current_time = time.time()
-
-        # Check if enough time has passed or if there's significant change
-        if (current_time - self.last_gps_log_time >= self.gps_log_interval or
-                self.gps.has_significant_change()):
-
-            try:
-                # Get current trip if any
-                current_trip = self.database.get_current_trip()
-                trip_id = current_trip['id'] if current_trip else None
-
-                # Create logbook entry
-                entry_data = {
-                    'latitude': gps_status['latitude'],
-                    'longitude': gps_status['longitude'],
-                    'speed': gps_status.get('speed', 0),
-                    'heading': gps_status.get('heading', 0),
-                    'altitude': gps_status.get('altitude', 0),
-                    'trip_id': trip_id,
-                    'content': f"GPS position update - Speed: {gps_status.get('speed', 0):.1f} km/h"
-                }
-
-                self.database.add_logbook_entry(entry_data)
-                self.last_gps_log_time = current_time
-
-                logger.debug(f"Logged GPS position: {gps_status['latitude']:.4f}, {gps_status['longitude']:.4f}")
-
-            except Exception as e:
-                logger.error(f"Error logging GPS position: {e}")
-
-    def _update_display(self):
-        """Update the e-paper display"""
-        try:
-            if self.display_mode == 'sync_setup':
-                # Show sync setup screen
-                image = self.map_renderer.render_sync_setup_screen()
-                self.display.update(image)
-
-            elif self.display_mode == 'menu':
-                # Show menu
-                image = self.menu_system.render()
-                self.display.update(image)
-
-            elif self.display_mode == 'map':
-                # Get current status
-                gps_status = self.gps.get_status()
-                wifi_status = self.wifi_manager.get_status()
-
-                # Check if we have GPS fix
-                if gps_status['fix_quality'] > 0:
-                    lat = gps_status['latitude']
-                    lon = gps_status['longitude']
-
-                    # Get heading from GY-511 if available, otherwise use GPS
-                    heading = 0
-                    try:
-                        gy511_data = self.gy511.read_data()
-                        if gy511_data and 'heading' in gy511_data:
-                            heading = gy511_data['heading']
-                            self._last_gy511_heading = heading
-                    except:
-                        # Fall back to GPS heading
-                        heading = gps_status.get('heading', 0)
-
-                    # Get map points for current trip
-                    current_trip = self.database.get_current_trip()
-                    map_points = None
-                    if current_trip:
-                        map_points = self.database.get_trip_waypoints(current_trip['id'])
-
-                    # Render map
-                    image, metadata = self.map_renderer.render_map(
-                        lat, lon, self.current_zoom, heading,
-                        wifi_status, gps_status, map_points
-                    )
-
-                    # Log GPS position
-                    self._log_gps_position(gps_status)
-
-                else:
-                    # Use fallback coordinates or show waiting screen
-                    fallback_coords = self.config.get('fallback_coordinates', [52.3676, 4.9041])
-
-                    if gps_status['satellites'] > 0:
-                        # Show waiting screen if we have satellites but no fix
-                        image = self.map_renderer.render_waiting_screen(wifi_status, gps_status)
-                    else:
-                        # Show map at fallback location
-                        image, metadata = self.map_renderer.render_map(
-                            fallback_coords[0], fallback_coords[1], self.current_zoom, 0,
-                            wifi_status, gps_status
-                        )
-
-                self.display.update(image)
-
-        except Exception as e:
-            logger.error(f"Display update error: {e}")
-
-    def _sync_data(self):
-        """Perform data synchronization"""
-        if not self.sync_manager.is_enabled():
-            return
-
-        try:
-            # Check WiFi status
-            wifi_connected = self.wifi_manager.check_wifi_status()
-
-            if wifi_connected:
-                # Ping device with current GPS position
-                gps_status = self.gps.get_status()
-                if self.sync_manager.should_ping():
-                    success, message = self.sync_manager.ping_device(gps_status)
-                    if success:
-                        logger.debug("Device ping successful")
-                    else:
-                        logger.warning(f"Device ping failed: {message}")
-
-                # Sync pending data periodically
-                results = self.sync_manager.sync_pending_data()
-                if results:
-                    logger.info(f"Sync results: {results}")
-
-        except Exception as e:
-            logger.error(f"Sync error: {e}")
+            return default_config
 
     def start(self):
         """Start the navigation system"""
         logger.info("Starting GPS Navigation System")
 
-        try:
-            # Initialize display
-            if not self.display.initialize():
-                logger.error("Failed to initialize display")
-                return False
+        # Check sync configuration first
+        if not self.sync_manager.is_valid_sync_key():
+            logger.warning("Invalid or missing sync key - showing setup screen")
+            self._show_sync_setup_screen()
+            return
 
-            # Start GPS
-            if not self.gps.start_reading():
-                logger.error("Failed to start GPS")
-                return False
+        # Initialize display
+        if not self.display.initialize():
+            logger.error("Failed to initialize display")
+            return
 
-            # Initialize GY-511
+        # Start GPS
+        if not self.gps.start_reading():
+            logger.error("Failed to start GPS")
+            return
+
+        # Start GY-511 sensor
+        if not self.gy511.begin():
+            logger.warning("Failed to start GY-511 sensor - continuing without compass")
+
+        # Show initial screen
+        self._show_waiting_screen()
+
+        # Main loop
+        self.running = True
+        self._main_loop()
+
+    def _show_sync_setup_screen(self):
+        """Show sync setup configuration screen and wait for button press"""
+        if not self.display.initialize():
+            logger.error("Failed to initialize display for sync setup")
+            return
+
+        # Render and display sync setup screen
+        setup_image = self.map_renderer.render_sync_setup_screen()
+        self.display.update(setup_image)
+
+        # Wait for any button press
+        logger.info("Waiting for button press to retry sync key detection...")
+        button_pressed = False
+
+        def on_any_button():
+            nonlocal button_pressed
+            button_pressed = True
+
+        # Temporarily assign all buttons to the same callback
+        self.button_up.when_pressed = on_any_button
+        self.button_down.when_pressed = on_any_button
+        self.button_left.when_pressed = on_any_button
+        self.button_right.when_pressed = on_any_button
+        self.button_center.when_pressed = on_any_button
+
+        # Wait for button press
+        while not button_pressed:
+            time.sleep(0.1)
+
+        # Restore original button callbacks
+        self.button_up.when_pressed = self.on_button_up
+        self.button_down.when_pressed = self.on_button_down
+        self.button_left.when_pressed = self.on_button_left
+        self.button_right.when_pressed = self.on_button_right
+        self.button_center.when_pressed = self.on_button_center
+
+        # Re-check sync key
+        self.sync_manager = SyncManager(self.db)  # Reinitialize to re-read key
+
+        if self.sync_manager.is_valid_sync_key():
+            logger.info("Valid sync key detected - continuing with normal startup")
+            # Continue with normal startup
+            self.start()
+        else:
+            logger.info("Still no valid sync key - showing setup screen again")
+            self._show_sync_setup_screen()  # Show again
+
+    def _show_waiting_screen(self):
+        """Show waiting for GPS screen"""
+        wifi_status = self.wifi.get_status()
+        waiting_image = self.map_renderer.render_waiting_screen(wifi_status)
+        self.display.update(waiting_image)
+
+    def _main_loop(self):
+        """Main application loop"""
+        logger.info("Entering main loop")
+
+        while self.running:
             try:
-                self.gy511.initialize()
-                logger.info("GY-511 sensor initialized")
-            except Exception as e:
-                logger.warning(f"GY-511 initialization failed: {e}")
-
-            self.running = True
-
-            # Main loop
-            last_display_update = 0
-            last_sync_check = 0
-            display_update_interval = 5  # seconds
-            sync_check_interval = 60  # seconds
-
-            while self.running:
                 current_time = time.time()
 
-                # Update display periodically
-                if current_time - last_display_update >= display_update_interval:
-                    self._update_display()
-                    last_display_update = current_time
-
-                # Check sync periodically
-                if current_time - last_sync_check >= sync_check_interval:
-                    self._sync_data()
-                    last_sync_check = current_time
-
                 # Update WiFi status
-                self.wifi_manager.check_wifi_status()
+                self.wifi.check_wifi_status()
 
-                # Small delay to prevent excessive CPU usage
-                time.sleep(0.5)
+                # Get GPS status
+                gps_status = self.gps.get_status()
 
-        except KeyboardInterrupt:
-            logger.info("Received interrupt signal")
+                # Get GY-511 heading if available
+                gy511_heading = self.gy511.get_heading()
+                if gy511_heading is not None:
+                    self._last_gy511_heading = gy511_heading
+                    self._gy511_update_time = current_time
+
+                # Use GY-511 heading if available and recent, otherwise GPS heading
+                heading = 0
+                if (self._last_gy511_heading is not None and
+                        current_time - self._gy511_update_time < 5):  # Use if updated within 5 seconds
+                    heading = self._last_gy511_heading
+                elif gps_status.get('heading', 0) > 0:
+                    heading = gps_status.get('heading', 0)
+
+                # Check if we have GPS fix
+                if gps_status.get('fix_quality', 0) > 0:
+                    lat = gps_status['latitude']
+                    lon = gps_status['longitude']
+
+                    # Handle menu mode
+                    if self.in_menu:
+                        self._handle_menu_mode()
+                    else:
+                        # Update display if enough time has passed
+                        if current_time - self.last_display_update >= self.display_update_interval:
+                            self._update_map_display(lat, lon, heading, gps_status)
+                            self.last_display_update = current_time
+
+                        # Handle sync operations
+                        self._handle_sync_operations(gps_status)
+
+                        # Handle logbook entries
+                        self._handle_logbook_entries(gps_status)
+                else:
+                    # No GPS fix - show waiting screen
+                    if current_time - self.last_display_update >= self.display_update_interval:
+                        self._show_waiting_screen()
+                        self.last_display_update = current_time
+
+                time.sleep(0.5)  # Main loop delay
+
+            except KeyboardInterrupt:
+                logger.info("Received interrupt signal")
+                break
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}")
+                time.sleep(1)
+
+        self.stop()
+
+    def _update_map_display(self, lat, lon, heading, gps_status):
+        """Update the map display"""
+        try:
+            wifi_status = self.wifi.get_status()
+
+            # Get current trip points if we have an active trip
+            map_points = None
+            if self.current_trip_id:
+                map_points = self.db.get_trip_points(self.current_trip_id)
+
+            # Render map
+            map_image, metadata = self.map_renderer.render_map(
+                lat, lon, self.current_zoom, heading,
+                wifi_status, gps_status, map_points
+            )
+
+            # Display the map
+            self.display.update(map_image)
+
+            logger.debug(f"Map updated: {lat:.4f}, {lon:.4f}, zoom {self.current_zoom}, "
+                         f"heading {heading:.1f}°")
+
         except Exception as e:
-            logger.error(f"System error: {e}")
-        finally:
-            self.stop()
+            logger.error(f"Error updating map display: {e}")
 
-        return True
+    def _handle_menu_mode(self):
+        """Handle menu mode operations"""
+        try:
+            menu_image = self.menu.render()
+            self.display.update(menu_image)
+        except Exception as e:
+            logger.error(f"Error in menu mode: {e}")
+            self.in_menu = False
+
+    def _handle_sync_operations(self, gps_status):
+        """Handle synchronization operations"""
+        current_time = time.time()
+
+        # Skip if sync is not enabled
+        if not self.sync_manager.is_enabled():
+            return
+
+        # Skip if no WiFi
+        if not self.wifi.is_connected:
+            return
+
+        try:
+            # Send ping if needed
+            if self.sync_manager.should_ping():
+                success, message = self.sync_manager.ping_device(gps_status)
+                if success:
+                    logger.debug("Device ping successful")
+                else:
+                    logger.warning(f"Device ping failed: {message}")
+
+            # Full sync if enough time has passed
+            if current_time - self.last_sync_attempt >= self.sync_interval:
+                # Sync pending data
+                sync_results = self.sync_manager.sync_pending_data()
+                if sync_results:
+                    logger.info(f"Sync completed: {', '.join(sync_results)}")
+
+                # Sync device data (trips)
+                success, message = self.sync_manager.sync_device_data()
+                if success:
+                    logger.info(f"Device sync: {message}")
+                else:
+                    logger.warning(f"Device sync failed: {message}")
+
+                self.last_sync_attempt = current_time
+
+        except Exception as e:
+            logger.error(f"Error in sync operations: {e}")
+
+    def _handle_logbook_entries(self, gps_status):
+        """Handle automatic logbook entries"""
+        current_time = time.time()
+
+        # Create logbook entry if enough time has passed or significant change
+        if (current_time - self.last_logbook_entry >= self.logbook_interval or
+                self.gps.has_significant_change()):
+
+            try:
+                entry_data = {
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'latitude': gps_status['latitude'],
+                    'longitude': gps_status['longitude'],
+                    'speed': gps_status.get('speed', 0),
+                    'heading': gps_status.get('heading', 0),
+                    'altitude': gps_status.get('altitude', 0),
+                    'satellites': gps_status.get('satellites', 0),
+                    'trip_id': self.current_trip_id,
+                    'content': f"GPS tracker entry - Speed: {gps_status.get('speed', 0):.1f} km/h"
+                }
+
+                self.db.add_logbook_entry(entry_data)
+                self.last_logbook_entry = current_time
+
+                logger.debug(f"Logbook entry created: {gps_status.get('speed', 0):.1f} km/h")
+
+            except Exception as e:
+                logger.error(f"Error creating logbook entry: {e}")
+
+    # Button handlers
+    def on_button_up(self):
+        """Handle up button press"""
+        if self.in_menu:
+            self.menu.navigate_up()
+        else:
+            # Zoom in
+            if self.current_zoom < self.max_zoom:
+                self.current_zoom += 1
+                logger.info(f"Zoomed in to level {self.current_zoom}")
+
+    def on_button_down(self):
+        """Handle down button press"""
+        if self.in_menu:
+            self.menu.navigate_down()
+        else:
+            # Zoom out
+            if self.current_zoom > self.min_zoom:
+                self.current_zoom -= 1
+                logger.info(f"Zoomed out to level {self.current_zoom}")
+
+    def on_button_left(self):
+        """Handle left button press"""
+        if self.in_menu:
+            self.menu.navigate_back()
+        else:
+            # Previous map region
+            self.mbtiles_manager.switch_to_previous_file()
+            logger.info("Switched to previous map region")
+
+    def on_button_right(self):
+        """Handle right button press"""
+        if self.in_menu:
+            self.menu.navigate_forward()
+        else:
+            # Next map region
+            self.mbtiles_manager.switch_to_next_file()
+            logger.info("Switched to next map region")
+
+    def on_button_center(self):
+        """Handle center button press"""
+        if self.in_menu:
+            result = self.menu.select()
+            if result:
+                if result.get('action') == 'exit_menu':
+                    self.in_menu = False
+                elif result.get('action') == 'start_trip':
+                    self.current_trip_id = result.get('trip_id')
+                    self.in_menu = False
+                elif result.get('action') == 'stop_trip':
+                    self.current_trip_id = None
+                    self.in_menu = False
+        else:
+            # Enter menu
+            self.in_menu = True
+            logger.info("Entered menu mode")
 
     def stop(self):
         """Stop the navigation system"""
         logger.info("Stopping GPS Navigation System")
-
         self.running = False
 
         # Stop GPS
         self.gps.stop()
 
-        # Close database
-        self.database.close()
+        # Stop GY-511
+        self.gy511.cleanup()
 
-        # Close MBTiles files
-        self.mbtiles_manager.close_all()
+        # Cleanup display
+        self.display.cleanup()
+
+        # Close database
+        self.db.close()
 
         logger.info("GPS Navigation System stopped")
 
@@ -1321,8 +1400,10 @@ def main():
         nav_system = GPSNavigationSystem()
         nav_system.start()
 
+    except KeyboardInterrupt:
+        logger.info("Application interrupted by user")
     except Exception as e:
-        logger.error(f"Failed to start navigation system: {e}")
+        logger.error(f"Application error: {e}")
         return 1
 
     return 0

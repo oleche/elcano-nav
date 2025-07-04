@@ -16,305 +16,177 @@ logger = logging.getLogger(__name__)
 
 
 class EPaperDisplay:
-    """E-Paper Display Driver"""
+    """Waveshare 7.5" e-Paper display driver"""
 
     def __init__(self):
-        # Display dimensions
-        self.width = 800
-        self.height = 480
-
-        # GPIO pins
+        # Pin definitions
         self.RST_PIN = 17
         self.DC_PIN = 25
         self.CS_PIN = 8
         self.BUSY_PIN = 24
 
-        # SPI interface
-        self.spi = None
+        # Display dimensions
+        self.width = 800
+        self.height = 480
 
-        # Initialization state
-        self.initialized = False
+        # SPI setup
+        self.spi = spidev.SpiDev()
+
+        # Initialize GPIO
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        GPIO.setup(self.RST_PIN, GPIO.OUT)
+        GPIO.setup(self.DC_PIN, GPIO.OUT)
+        GPIO.setup(self.CS_PIN, GPIO.OUT)
+        GPIO.setup(self.BUSY_PIN, GPIO.IN)
 
         logger.info("EPaperDisplay instance created")
 
-    def _gpio_setup(self):
-        """Setup GPIO pins"""
+    def initialize(self):
+        """Initialize the e-Paper display"""
         try:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)
-
-            GPIO.setup(self.RST_PIN, GPIO.OUT)
-            GPIO.setup(self.DC_PIN, GPIO.OUT)
-            GPIO.setup(self.CS_PIN, GPIO.OUT)
-            GPIO.setup(self.BUSY_PIN, GPIO.IN)
-
-            # Set initial states
-            GPIO.output(self.CS_PIN, 1)
-            GPIO.output(self.RST_PIN, 1)
-
-            logger.debug("GPIO pins configured")
-            return True
-
-        except Exception as e:
-            logger.error(f"GPIO setup failed: {e}")
-            return False
-
-    def _spi_setup(self):
-        """Setup SPI interface"""
-        try:
-            self.spi = spidev.SpiDev()
+            # Initialize SPI
             self.spi.open(0, 0)  # Bus 0, Device 0
             self.spi.max_speed_hz = 4000000
             self.spi.mode = 0
 
-            logger.debug("SPI interface configured")
-            return True
-
-        except Exception as e:
-            logger.error(f"SPI setup failed: {e}")
-            return False
-
-    def _wait_until_idle(self, timeout=30):
-        """Wait until the display is idle"""
-        start_time = time.time()
-
-        while GPIO.input(self.BUSY_PIN) == 1:
-            if time.time() - start_time > timeout:
-                logger.warning("Display busy timeout")
-                return False
-            time.sleep(0.1)
-
-        logger.debug("Display is idle")
-        return True
-
-    def _send_command(self, command):
-        """Send command to display"""
-        try:
-            GPIO.output(self.DC_PIN, 0)  # Command mode
-            GPIO.output(self.CS_PIN, 0)
-            self.spi.writebytes([command])
-            GPIO.output(self.CS_PIN, 1)
-
-        except Exception as e:
-            logger.error(f"Failed to send command 0x{command:02X}: {e}")
-
-    def _send_data(self, data):
-        """Send data to display"""
-        try:
-            GPIO.output(self.DC_PIN, 1)  # Data mode
-            GPIO.output(self.CS_PIN, 0)
-
-            if isinstance(data, int):
-                self.spi.writebytes([data])
-            else:
-                self.spi.writebytes(data)
-
-            GPIO.output(self.CS_PIN, 1)
-
-        except Exception as e:
-            logger.error(f"Failed to send data: {e}")
-
-    def _reset(self):
-        """Reset the display"""
-        logger.debug("Resetting display")
-
-        GPIO.output(self.RST_PIN, 1)
-        time.sleep(0.2)
-        GPIO.output(self.RST_PIN, 0)
-        time.sleep(0.01)
-        GPIO.output(self.RST_PIN, 1)
-        time.sleep(0.2)
-
-    def initialize(self):
-        """Initialize the e-paper display"""
-        logger.info("Initializing e-paper display")
-
-        try:
-            # Setup hardware interfaces
-            if not self._gpio_setup():
-                return False
-
-            if not self._spi_setup():
-                return False
-
-            # Reset display
+            # Hardware reset
             self._reset()
 
-            # Wait for display to be ready
-            if not self._wait_until_idle():
-                logger.error("Display not ready after reset")
-                return False
-
-            # Initialize display with simplified sequence
-            logger.debug("Sending initialization commands")
-
-            # Power setting
-            self._send_command(0x01)
+            # Send initialization commands
+            self._send_command(0x01)  # POWER_SETTING
             self._send_data(0x07)
             self._send_data(0x07)
             self._send_data(0x3f)
             self._send_data(0x3f)
 
-            # Power on
-            self._send_command(0x04)
-            time.sleep(0.1)
+            self._send_command(0x04)  # POWER_ON
             self._wait_until_idle()
 
-            # Panel setting
-            self._send_command(0x00)
-            self._send_data(0x1F)  # KW-3f, KWR-2F, BWROTP-0f, BWOTP-1f
+            self._send_command(0x00)  # PANEL_SETTING
+            self._send_data(0x1F)  # KW-3f   KWR-2F	BWROTP 0f	BWOTP 1f
 
-            # Resolution setting
-            self._send_command(0x61)
-            self._send_data(0x03)  # Width high byte
-            self._send_data(0x20)  # Width low byte (800)
-            self._send_data(0x01)  # Height high byte
-            self._send_data(0xE0)  # Height low byte (480)
+            self._send_command(0x61)  # RESOLUTION_SETTING
+            self._send_data(0x03)  # source 800
+            self._send_data(0x20)
+            self._send_data(0x01)  # gate 480
+            self._send_data(0xE0)
 
-            # Dual SPI mode
             self._send_command(0x15)
             self._send_data(0x00)
 
-            # VCOM and data interval setting
-            self._send_command(0x50)
+            self._send_command(0x50)  # VCOM_AND_DATA_INTERVAL_SETTING
             self._send_data(0x11)
             self._send_data(0x07)
 
-            # Tcon setting
-            self._send_command(0x60)
+            self._send_command(0x60)  # TCON_SETTING
             self._send_data(0x22)
 
-            # Wait for initialization to complete
-            self._wait_until_idle()
-
-            self.initialized = True
-            logger.info("E-paper display initialized successfully")
+            logger.info("E-Paper display initialized successfully")
             return True
 
         except Exception as e:
-            logger.error(f"Display initialization failed: {e}")
+            logger.error(f"Failed to initialize e-Paper display: {e}")
             return False
 
-    def _prepare_image_data(self, image):
-        """Prepare image data for display"""
-        try:
-            # Ensure image is correct size
-            if image.size != (self.width, self.height):
-                image = image.resize((self.width, self.height), Image.Resampling.LANCZOS)
+    def _reset(self):
+        """Hardware reset"""
+        GPIO.output(self.RST_PIN, GPIO.HIGH)
+        time.sleep(0.2)
+        GPIO.output(self.RST_PIN, GPIO.LOW)
+        time.sleep(0.2)
+        GPIO.output(self.RST_PIN, GPIO.HIGH)
+        time.sleep(0.2)
 
-            # Convert to grayscale if needed
-            if image.mode != 'L':
-                image = image.convert('L')
+    def _send_command(self, command):
+        """Send command to display"""
+        GPIO.output(self.DC_PIN, GPIO.LOW)
+        GPIO.output(self.CS_PIN, GPIO.LOW)
+        self.spi.writebytes([command])
+        GPIO.output(self.CS_PIN, GPIO.HIGH)
 
-            # Convert to bytes
-            image_data = []
-            pixels = list(image.getdata())
+    def _send_data(self, data):
+        """Send data to display"""
+        GPIO.output(self.DC_PIN, GPIO.HIGH)
+        GPIO.output(self.CS_PIN, GPIO.LOW)
+        self.spi.writebytes([data])
+        GPIO.output(self.CS_PIN, GPIO.HIGH)
 
-            # Pack pixels into bytes (8 pixels per byte)
-            for i in range(0, len(pixels), 8):
-                byte_val = 0
-                for j in range(8):
-                    if i + j < len(pixels):
-                        # Threshold: > 128 = white (1), <= 128 = black (0)
-                        if pixels[i + j] > 128:
-                            byte_val |= (1 << (7 - j))
-                image_data.append(byte_val)
-
-            logger.debug(f"Prepared {len(image_data)} bytes of image data")
-            return image_data
-
-        except Exception as e:
-            logger.error(f"Image preparation failed: {e}")
-            return None
+    def _wait_until_idle(self):
+        """Wait until display is ready"""
+        while GPIO.input(self.BUSY_PIN) == 1:
+            time.sleep(0.01)
 
     def update(self, image):
         """Update display with new image"""
-        if not self.initialized:
-            logger.error("Display not initialized")
-            return False
-
-        logger.info("Updating display")
-
         try:
-            # Prepare image data
-            image_data = self._prepare_image_data(image)
-            if not image_data:
-                return False
+            # Ensure image is correct size and format
+            if image.size != (self.width, self.height):
+                image = image.resize((self.width, self.height))
+
+            if image.mode != 'L':
+                image = image.convert('L')
+
+            # Convert to 1-bit
+            image = image.point(lambda x: 0 if x < 128 else 255, '1')
 
             # Send image data
-            self._send_command(0x13)  # Start data transmission
+            self._send_command(0x13)  # DATA_START_TRANSMISSION_2
 
-            # Send data in chunks to avoid overwhelming SPI
-            chunk_size = 1024
-            for i in range(0, len(image_data), chunk_size):
-                chunk = image_data[i:i + chunk_size]
-                self._send_data(chunk)
+            # Convert image to bytes
+            buf = []
+            for y in range(self.height):
+                for x in range(0, self.width, 8):
+                    byte = 0
+                    for bit in range(8):
+                        if x + bit < self.width:
+                            pixel = image.getpixel((x + bit, y))
+                            if pixel == 0:  # Black pixel
+                                byte |= (1 << (7 - bit))
+                    buf.append(byte)
 
-                # Small delay between chunks
-                if i % (chunk_size * 10) == 0:
-                    time.sleep(0.01)
+            # Send data in chunks
+            chunk_size = 4096
+            for i in range(0, len(buf), chunk_size):
+                chunk = buf[i:i + chunk_size]
+                GPIO.output(self.DC_PIN, GPIO.HIGH)
+                GPIO.output(self.CS_PIN, GPIO.LOW)
+                self.spi.writebytes(chunk)
+                GPIO.output(self.CS_PIN, GPIO.HIGH)
 
             # Refresh display
-            self._send_command(0x12)  # Display refresh
-            time.sleep(0.1)
-
-            # Wait for refresh to complete
-            if not self._wait_until_idle(timeout=60):
-                logger.warning("Display refresh timeout")
-                return False
+            self._send_command(0x12)  # DISPLAY_REFRESH
+            self._wait_until_idle()
 
             logger.info("Display updated successfully")
-            return True
 
         except Exception as e:
-            logger.error(f"Display update failed: {e}")
-            return False
+            logger.error(f"Error updating display: {e}")
 
     def clear(self):
-        """Clear display to white"""
-        logger.info("Clearing display")
-
+        """Clear the display"""
         try:
             # Create white image
             white_image = Image.new('L', (self.width, self.height), 255)
-            return self.update(white_image)
-
+            self.update(white_image)
+            logger.info("Display cleared")
         except Exception as e:
-            logger.error(f"Display clear failed: {e}")
-            return False
+            logger.error(f"Error clearing display: {e}")
 
     def sleep(self):
-        """Put display into sleep mode"""
-        if not self.initialized:
-            return
-
-        logger.info("Putting display to sleep")
-
-        try:
-            self._send_command(0x02)  # Power off
-            self._wait_until_idle()
-
-            self._send_command(0x07)  # Deep sleep
-            self._send_data(0xA5)
-
-        except Exception as e:
-            logger.error(f"Display sleep failed: {e}")
+        """Put display to sleep"""
+        self._send_command(0x02)  # POWER_OFF
+        self._wait_until_idle()
+        self._send_command(0x07)  # DEEP_SLEEP
+        self._send_data(0xA5)
 
     def cleanup(self):
-        """Cleanup resources"""
-        logger.info("Cleaning up display resources")
-
+        """Cleanup GPIO and SPI"""
         try:
-            if self.initialized:
-                self.sleep()
-
-            if self.spi:
-                self.spi.close()
-
+            self.spi.close()
             GPIO.cleanup()
-
-        except Exception as e:
-            logger.error(f"Display cleanup failed: {e}")
+        except:
+            pass
 
 
 def main():
