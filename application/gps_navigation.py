@@ -916,18 +916,36 @@ class MapRenderer:
             self.mbtiles_manager.close_all()
 
     def _draw_rounded_rectangle(self, draw, bbox, radius=10, fill=255, outline=0, width=2):
-        """Draw a rounded rectangle"""
+        """Draw a clean rounded rectangle without overlapping lines"""
         x1, y1, x2, y2 = bbox
 
-        # Draw the main rectangle
-        draw.rectangle([x1 + radius, y1, x2 - radius, y2], fill=fill, outline=outline, width=width)
-        draw.rectangle([x1, y1 + radius, x2, y2 - radius], fill=fill, outline=outline, width=width)
+        # Draw the main rectangle body (without corners)
+        draw.rectangle([x1 + radius, y1, x2 - radius, y2], fill=fill)
+        draw.rectangle([x1, y1 + radius, x2, y2 - radius], fill=fill)
 
-        # Draw the corners
-        draw.pieslice([x1, y1, x1 + 2 * radius, y1 + 2 * radius], 180, 270, fill=fill, outline=outline, width=width)
-        draw.pieslice([x2 - 2 * radius, y1, x2, y1 + 2 * radius], 270, 360, fill=fill, outline=outline, width=width)
-        draw.pieslice([x1, y2 - 2 * radius, x1 + 2 * radius, y2], 90, 180, fill=fill, outline=outline, width=width)
-        draw.pieslice([x2 - 2 * radius, y2 - 2 * radius, x2, y2], 0, 90, fill=fill, outline=outline, width=width)
+        # Draw the four corner arcs
+        # Top-left corner
+        draw.pieslice([x1, y1, x1 + 2 * radius, y1 + 2 * radius], 180, 270, fill=fill)
+        # Top-right corner
+        draw.pieslice([x2 - 2 * radius, y1, x2, y1 + 2 * radius], 270, 360, fill=fill)
+        # Bottom-left corner
+        draw.pieslice([x1, y2 - 2 * radius, x1 + 2 * radius, y2], 90, 180, fill=fill)
+        # Bottom-right corner
+        draw.pieslice([x2 - 2 * radius, y2 - 2 * radius, x2, y2], 0, 90, fill=fill)
+
+        # Draw the outline if specified
+        if outline is not None and width > 0:
+            # Draw straight edges
+            draw.line([x1 + radius, y1, x2 - radius, y1], fill=outline, width=width)  # Top
+            draw.line([x1 + radius, y2, x2 - radius, y2], fill=outline, width=width)  # Bottom
+            draw.line([x1, y1 + radius, x1, y2 - radius], fill=outline, width=width)  # Left
+            draw.line([x2, y1 + radius, x2, y2 - radius], fill=outline, width=width)  # Right
+
+            # Draw corner outlines
+            draw.arc([x1, y1, x1 + 2 * radius, y1 + 2 * radius], 180, 270, fill=outline, width=width)
+            draw.arc([x2 - 2 * radius, y1, x2, y1 + 2 * radius], 270, 360, fill=outline, width=width)
+            draw.arc([x1, y2 - 2 * radius, x1 + 2 * radius, y2], 90, 180, fill=outline, width=width)
+            draw.arc([x2 - 2 * radius, y2 - 2 * radius, x2, y2], 0, 90, fill=outline, width=width)
 
 
 class NavigationSystem:
@@ -1435,7 +1453,7 @@ class NavigationSystem:
         available_files = self.mbtiles_manager.get_available_files()
 
         if not available_files:
-            # Fallback to San Francisco if no maps available
+            # Fallback to Amsterdam if no maps available
             return 52.3791, 4.9003
 
         # Try to find a map with bounds and use its center
@@ -1533,7 +1551,7 @@ class NavigationSystem:
         box_y = self.map_renderer.height - box_height - 20
 
         # Draw rounded box background with border
-        self._draw_rounded_rectangle(
+        self.map_renderer._draw_rounded_rectangle(
             draw,
             [box_x, box_y, box_x + box_width, box_y + box_height],
             radius=10,
