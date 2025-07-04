@@ -10,7 +10,7 @@ USER_HOME=$(eval echo ~$REAL_USER)
 PROJECT_DIR="$USER_HOME/gps-navigation"
 
 echo "User: $REAL_USER"
-echo "Home: $USER_HOME"
+echo "Home: $USER_HOME" 
 echo "Project: $PROJECT_DIR"
 
 # Check if project directory exists
@@ -29,7 +29,6 @@ if [ ! -f "$PROJECT_DIR/gps_navigation.py" ]; then
     echo ""
     echo "Please copy all project files to $PROJECT_DIR/"
     echo "Required files:"
-    echo "  - gy511_sensor.py"
     echo "  - gps_navigation.py"
     echo "  - mbtiles_manager.py"
     echo "  - mbtiles_to_png.py"

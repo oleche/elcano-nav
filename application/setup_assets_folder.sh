@@ -63,10 +63,10 @@ EOF
 CONFIG_FILE="navigation_config.json"
 if [ -f "$CONFIG_FILE" ]; then
     echo "Updating configuration file: $CONFIG_FILE"
-
+    
     # Create backup
     cp "$CONFIG_FILE" "${CONFIG_FILE}.backup"
-
+    
     # Update assets_folder path using Python
     python3 -c "
 import json
@@ -75,12 +75,12 @@ import sys
 try:
     with open('$CONFIG_FILE', 'r') as f:
         config = json.load(f)
-
+    
     config['assets_folder'] = '$ASSETS_FOLDER/'
-
+    
     with open('$CONFIG_FILE', 'w') as f:
         json.dump(config, f, indent=2)
-
+    
     print('✓ Updated assets_folder in configuration')
 except Exception as e:
     print(f'✗ Error updating config: {e}')

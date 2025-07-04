@@ -30,7 +30,7 @@ echo "2. Checking main script..."
 if [ -f "$PROJECT_DIR/gps_navigation.py" ]; then
     echo "✓ Main script exists"
     echo "Permissions: $(ls -la "$PROJECT_DIR/gps_navigation.py")"
-
+    
     # Test if executable
     if [ -x "$PROJECT_DIR/gps_navigation.py" ]; then
         echo "✓ Script is executable"
@@ -106,32 +106,32 @@ try:
     from pathlib import Path
     import json
     print('✓ Basic imports work')
-
+    
     # Test hardware imports (may fail on non-Pi systems)
     try:
         import serial
         print('✓ Serial library available')
     except ImportError:
         print('ℹ Serial library not available (install with: pip3 install pyserial)')
-
+    
     try:
         import smbus
         print('✓ SMBus library available')
     except ImportError:
         print('ℹ SMBus library not available (install with: sudo apt-get install python3-smbus)')
-
+    
     try:
         from gpiozero import Button
         print('✓ GPIO library available')
     except ImportError:
         print('ℹ GPIO library not available (install with: pip3 install gpiozero)')
-
+    
     try:
         from PIL import Image
         print('✓ PIL library available')
     except ImportError:
         print('ℹ PIL library not available (install with: pip3 install Pillow)')
-
+    
     # Test main script import
     try:
         import gps_navigation
@@ -150,14 +150,14 @@ echo "8. Recommendations..."
 # Check if running on Raspberry Pi
 if grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
     echo "✓ Running on Raspberry Pi"
-
+    
     # Check if interfaces are enabled
     if [ -e /dev/spidev0.0 ]; then
         echo "✓ SPI interface enabled"
     else
         echo "ℹ SPI interface not enabled (run: sudo raspi-config)"
     fi
-
+    
     if [ -e /dev/i2c-1 ]; then
         echo "✓ I2C interface enabled"
     else

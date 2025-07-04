@@ -50,7 +50,7 @@ if [ -f "requirements.txt" ]; then
     python3 -m pip install -r requirements.txt
 else
     echo "requirements.txt not found, installing packages individually..."
-
+    
     # Core packages
     echo "Installing core packages..."
     python3 -m pip install \
@@ -60,16 +60,16 @@ else
         requests>=2.25.0 \
         gpiozero>=1.6.0 \
         psutil>=5.8.0
-
+    
     # Try to install hardware-specific packages
     echo "Installing hardware-specific packages..."
-
+    
     # smbus2 (alternative to system python3-smbus)
     python3 -m pip install smbus2>=0.4.0 || echo "Warning: smbus2 installation failed, using system package"
-
+    
     # spidev (alternative to system python3-spidev)
     python3 -m pip install spidev>=3.5 || echo "Warning: spidev installation failed, using system package"
-
+    
     # RPi.GPIO (alternative to system python3-rpi.gpio)
     python3 -m pip install RPi.GPIO>=0.7.0 || echo "Warning: RPi.GPIO installation failed, using system package"
 fi

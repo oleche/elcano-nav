@@ -26,20 +26,18 @@ if [ ! -d "$PROJECT_DIR" ]; then
 fi
 
 # Check required files
-REQUIRED_FILES="boot_splash.py epaper_display.py"
-MISSING_FILES=""
+REQUIRED_FILES=("boot_splash.py" "epaper_display.py")
+MISSING_FILES=()
 
-for file in $REQUIRED_FILES; do
+for file in "${REQUIRED_FILES[@]}"; do
     if [ ! -f "$PROJECT_DIR/$file" ]; then
-        MISSING_FILES="$MISSING_FILES $file"
+        MISSING_FILES+=("$file")
     fi
 done
 
-if [ -n "$MISSING_FILES" ]; then
+if [ ${#MISSING_FILES[@]} -gt 0 ]; then
     echo "Missing required files:"
-    for file in $MISSING_FILES; do
-        echo "  $file"
-    done
+    printf '  %s\n' "${MISSING_FILES[@]}"
     echo ""
     echo "Please copy these files to $PROJECT_DIR/"
     exit 1

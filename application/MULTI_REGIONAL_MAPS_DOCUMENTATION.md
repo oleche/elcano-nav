@@ -173,7 +173,7 @@ INSERT INTO metadata VALUES('maxzoom', '18');
 ### **Bounds Format**
 Bounds should be in the format: `"min_lon,min_lat,max_lon,max_lat"`
 - **min_lon**: Western boundary (longitude)
-- **min_lat**: Southern boundary (latitude)
+- **min_lat**: Southern boundary (latitude)  
 - **max_lon**: Eastern boundary (longitude)
 - **max_lat**: Northern boundary (latitude)
 

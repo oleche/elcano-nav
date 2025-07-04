@@ -105,7 +105,7 @@ echo ""
 echo "7. Testing GY-511 sensor class..."
 if [ -f "gy511_sensor.py" ]; then
     echo "✅ gy511_sensor.py found"
-
+    
     python3 -c "
 try:
     from gy511_sensor import GY511
@@ -126,7 +126,7 @@ if [ "$ACCEL_FOUND" = true ] && [ "$MAG_FOUND" = true ]; then
     echo "Next steps:"
     echo "1. Test the sensor: python3 test_gy511_standalone.py"
     echo "2. Run navigation system: python3 gps_navigation.py"
-
+    
 elif [ "$ACCEL_FOUND" = true ] || [ "$MAG_FOUND" = true ]; then
     echo "⚠️  Partial GY-511 detection"
     if [ "$ACCEL_FOUND" = false ]; then
@@ -140,7 +140,7 @@ elif [ "$ACCEL_FOUND" = true ] || [ "$MAG_FOUND" = true ]; then
     echo "- Loose connections"
     echo "- Wrong module (not LSM303DLHC)"
     echo "- Faulty sensor"
-
+    
 else
     echo "❌ GY-511 sensor not detected"
     echo ""

@@ -40,12 +40,12 @@ if [ -f "$SERVICE_FILE" ]; then
     echo "Contents:"
     cat "$SERVICE_FILE"
     echo ""
-
+    
     # Check service status
     echo "Service status:"
     sudo systemctl status boot-splash.service --no-pager -l
     echo ""
-
+    
     # Check if enabled
     if systemctl is-enabled boot-splash.service >/dev/null 2>&1; then
         echo "✓ Service is enabled"
@@ -91,7 +91,7 @@ if [ -f "boot_splash.py" ]; then
     echo "Running: python3 boot_splash.py"
     timeout 30 python3 boot_splash.py
     RESULT=$?
-
+    
     if [ $RESULT -eq 0 ]; then
         echo "✓ Boot splash ran successfully"
     elif [ $RESULT -eq 124 ]; then

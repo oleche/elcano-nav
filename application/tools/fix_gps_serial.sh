@@ -37,7 +37,7 @@ echo ""
 echo "3. Checking serial port configuration..."
 
 # Check if serial is enabled in config
-if grep -q "enable_uart=1" /boot/firmware/config.txt 2>/dev/null ||  grep -q "enable_uart=1" /boot/config.txt 2>/dev/null; then
+if grep -q "enable_uart=1" /boot/config.txt 2>/dev/null || grep -q "enable_uart=1" /boot/firmware/config.txt 2>/dev/null; then
     echo "✓ UART is enabled in config.txt"
 else
     echo "✗ UART not enabled in config.txt"
@@ -45,7 +45,7 @@ else
 fi
 
 # Check if serial console is disabled
-if grep -q "console=serial" /boot/firmware/cmdline.txt 2>/dev/null || grep -q "console=serial" /boot/cmdline.txt 2>/dev/null ; then
+if grep -q "console=serial" /boot/cmdline.txt 2>/dev/null || grep -q "console=serial" /boot/firmware/cmdline.txt 2>/dev/null; then
     echo "✗ Serial console is enabled (conflicts with GPS)"
     echo "  Fix: Remove console=serial0,115200 from /boot/cmdline.txt"
 else
@@ -67,17 +67,17 @@ echo "4. Testing available serial ports..."
 for port in "/dev/ttyAMA0" "/dev/ttyS0" "/dev/ttyUSB0" "/dev/ttyUSB1"; do
     if [ -e "$port" ]; then
         echo "Testing $port..."
-
+        
         # Check permissions
         if [ -r "$port" ] && [ -w "$port" ]; then
             echo "  ✓ Port exists and is accessible"
-
+            
             # Try to read from port (timeout after 3 seconds)
             timeout 3 cat "$port" > /tmp/gps_test.txt 2>/dev/null &
             PID=$!
             sleep 3
             kill $PID 2>/dev/null
-
+            
             if [ -s /tmp/gps_test.txt ]; then
                 echo "  ✓ Data received from $port"
                 echo "  Sample data:"
@@ -101,9 +101,9 @@ done
 echo "5. Automatic fixes..."
 
 # Fix 1: Enable UART
-CONFIG_FILE="/boot/firmware/config.txt"
+CONFIG_FILE="/boot/config.txt"
 if [ ! -f "$CONFIG_FILE" ]; then
-    CONFIG_FILE="/boot/config.txt"
+    CONFIG_FILE="/boot/firmware/config.txt"
 fi
 
 if [ -f "$CONFIG_FILE" ]; then
@@ -118,9 +118,9 @@ else
 fi
 
 # Fix 2: Disable serial console
-CMDLINE_FILE="/boot/firmware/cmdline.txt"
+CMDLINE_FILE="/boot/cmdline.txt"
 if [ ! -f "$CMDLINE_FILE" ]; then
-    CMDLINE_FILE="/boot/cmdline.txt"
+    CMDLINE_FILE="/boot/firmware/cmdline.txt"
 fi
 
 if [ -f "$CMDLINE_FILE" ]; then
@@ -151,7 +151,7 @@ if [[ "$PI_MODEL" =~ ^(a02082|a22082|a32082|a52082|a020d3) ]]; then
     echo "3. Use mini UART for GPS (may have timing issues)"
     echo ""
     read -p "Choose option (1/2/3) or press Enter to skip: " choice
-
+    
     case $choice in
         1)
             echo "Disabling Bluetooth..."
@@ -184,7 +184,7 @@ echo "6. Creating GPS configuration..."
 CONFIG_FILE="navigation_config.json"
 if [ -f "$CONFIG_FILE" ]; then
     echo "Updating $CONFIG_FILE with correct GPS port..."
-
+    
     # Determine best port to use
     if [ -n "$WORKING_PORT" ]; then
         GPS_PORT="$WORKING_PORT"
@@ -195,23 +195,23 @@ if [ -f "$CONFIG_FILE" ]; then
     else
         GPS_PORT="/dev/ttyS0"  # Default fallback
     fi
-
+    
     # Update config file
     python3 -c "
 import json
 try:
     with open('$CONFIG_FILE', 'r') as f:
         config = json.load(f)
-
+    
     if 'gps_settings' not in config:
         config['gps_settings'] = {}
-
+    
     config['gps_settings']['port'] = '$GPS_PORT'
     config['gps_settings']['baudrate'] = 9600
-
+    
     with open('$CONFIG_FILE', 'w') as f:
         json.dump(config, f, indent=2)
-
+    
     print('✓ Updated GPS port to $GPS_PORT')
 except Exception as e:
     print(f'✗ Error updating config: {e}')

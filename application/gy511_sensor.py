@@ -1,348 +1,357 @@
 #!/usr/bin/env python3
 """
-GY-511 (LSM303DLHC) Sensor Driver
-================================
-Driver for GY-511 module with LSM303DLHC accelerometer and magnetometer.
+GY-511 Compass and Accelerometer Sensor Driver
+==============================================
+Driver for the GY-511 (LSM303DLHC) compass and accelerometer sensor
+with enhanced calibration and heading calculation.
 """
 
 import time
 import math
 import logging
 import smbus
+import threading
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
-
 class GY511:
-    """GY-511 (LSM303DLHC) accelerometer and magnetometer handler"""
-
+    """GY-511 (LSM303DLHC) compass and accelerometer sensor driver"""
+    
     # I2C addresses
-    ACCEL_ADDRESS = 0x19  # Accelerometer address
-    MAG_ADDRESS = 0x1E  # Magnetometer address
-
+    ACCEL_ADDRESS = 0x19  # Accelerometer
+    MAG_ADDRESS = 0x1E    # Magnetometer
+    
     # Accelerometer registers
     ACCEL_CTRL_REG1_A = 0x20
     ACCEL_CTRL_REG4_A = 0x23
     ACCEL_OUT_X_L_A = 0x28
-
+    
     # Magnetometer registers
     MAG_CRA_REG_M = 0x00
     MAG_CRB_REG_M = 0x01
     MAG_MR_REG_M = 0x02
     MAG_OUT_X_H_M = 0x03
-
-    def __init__(self, bus=1):
-        self.bus = smbus.SMBus(bus)
-        self.compass_heading = 0.0
-        self.accel_x = 0.0
-        self.accel_y = 0.0
-        self.accel_z = 0.0
-        self.mag_x = 0.0
-        self.mag_y = 0.0
-        self.mag_z = 0.0
-        self.available = False
-
+    
+    def __init__(self, bus_number=1):
+        self.bus_number = bus_number
+        self.bus = None
+        self.running = False
+        self.thread = None
+        
+        # Sensor data
+        self.accel_x = 0
+        self.accel_y = 0
+        self.accel_z = 0
+        self.mag_x = 0
+        self.mag_y = 0
+        self.mag_z = 0
+        
+        # Heading calculation
+        self.heading = 0.0
+        self.tilt_compensated_heading = 0.0
+        
+        # Calibration data
+        self.mag_offset_x = 0
+        self.mag_offset_y = 0
+        self.mag_offset_z = 0
+        self.mag_scale_x = 1.0
+        self.mag_scale_y = 1.0
+        self.mag_scale_z = 1.0
+        
+        # Data smoothing
+        self.heading_history = deque(maxlen=5)
+        
+        # Last update time
+        self.last_update = 0
+        
+        logger.info("GY511 sensor initialized")
+    
     def begin(self):
-        """Initialize GY-511 (LSM303DLHC) - keeping original method name"""
+        """Initialize the GY-511 sensor"""
         try:
-            # Check if devices exist first
-            import subprocess
-            result = subprocess.run(['i2cdetect', '-y', '1'], capture_output=True, text=True)
-
-            accel_found = '19' in result.stdout
-            mag_found = '1e' in result.stdout
-
-            if not accel_found and not mag_found:
-                logger.warning("GY-511 (LSM303DLHC) not detected on I2C bus - sensor disabled")
-                return False
-
-            if not accel_found:
-                logger.warning("GY-511 accelerometer not found at address 0x19")
-                return False
-
-            if not mag_found:
-                logger.warning("GY-511 magnetometer not found at address 0x1E")
-                return False
-
+            self.bus = smbus.SMBus(self.bus_number)
+            
             # Initialize accelerometer
             # Enable accelerometer, 50Hz, all axes
             self.bus.write_byte_data(self.ACCEL_ADDRESS, self.ACCEL_CTRL_REG1_A, 0x47)
-            # Set scale to ±2g
+            
+            # Set accelerometer scale to ±2g
             self.bus.write_byte_data(self.ACCEL_ADDRESS, self.ACCEL_CTRL_REG4_A, 0x00)
-
+            
             # Initialize magnetometer
             # Set data rate to 15Hz
             self.bus.write_byte_data(self.MAG_ADDRESS, self.MAG_CRA_REG_M, 0x10)
+            
             # Set gain to ±1.3 gauss
             self.bus.write_byte_data(self.MAG_ADDRESS, self.MAG_CRB_REG_M, 0x20)
-            # Set continuous conversion mode
+            
+            # Set continuous measurement mode
             self.bus.write_byte_data(self.MAG_ADDRESS, self.MAG_MR_REG_M, 0x00)
-
-            # Test read to verify communication
-            test_accel = self.bus.read_byte_data(self.ACCEL_ADDRESS, self.ACCEL_CTRL_REG1_A)
-            test_mag = self.bus.read_byte_data(self.MAG_ADDRESS, self.MAG_MR_REG_M)
-
-            self.available = True
-            logger.info("GY-511 (LSM303DLHC) initialized successfully")
+            
+            time.sleep(0.1)  # Allow sensors to stabilize
+            
+            # Start reading thread
+            self.running = True
+            self.thread = threading.Thread(target=self._read_loop)
+            self.thread.daemon = True
+            self.thread.start()
+            
+            logger.info("GY511 sensor initialized successfully")
             return True
-
-        except FileNotFoundError:
-            logger.warning("i2cdetect command not found - cannot check for GY-511")
-            return False
+            
         except Exception as e:
-            logger.warning(f"GY-511 not available: {e}")
-            logger.info("Navigation will continue without compass sensor")
+            logger.error(f"Failed to initialize GY511 sensor: {e}")
             return False
-
-    def initialize(self):
-        """Alternative initialization method name for compatibility"""
-        return self.begin()
-
-    def read_accel_raw(self):
-        """Read raw accelerometer data"""
+    
+    def _read_loop(self):
+        """Main sensor reading loop"""
+        while self.running:
+            try:
+                self._read_accelerometer()
+                self._read_magnetometer()
+                self._calculate_heading()
+                self.last_update = time.time()
+                time.sleep(0.1)  # 10Hz update rate
+                
+            except Exception as e:
+                logger.debug(f"Error in GY511 read loop: {e}")
+                time.sleep(0.5)
+    
+    def _read_accelerometer(self):
+        """Read accelerometer data"""
         try:
             # Read 6 bytes starting from X low register
-            data = self.bus.read_i2c_block_data(self.ACCEL_ADDRESS, self.ACCEL_OUT_X_L_A | 0x80, 6)
-
+            data = self.bus.read_i2c_block_data(self.ACCEL_ADDRESS, 
+                                              self.ACCEL_OUT_X_L_A | 0x80, 6)
+            
             # Convert to signed 16-bit values
-            x = (data[1] << 8) | data[0]
-            y = (data[3] << 8) | data[2]
-            z = (data[5] << 8) | data[4]
-
-            # Convert to signed
-            if x > 32767:
-                x -= 65536
-            if y > 32767:
-                y -= 65536
-            if z > 32767:
-                z -= 65536
-
-            return x, y, z
+            self.accel_x = self._to_signed_16(data[1] << 8 | data[0])
+            self.accel_y = self._to_signed_16(data[3] << 8 | data[2])
+            self.accel_z = self._to_signed_16(data[5] << 8 | data[4])
+            
         except Exception as e:
-            logger.error(f"Error reading accelerometer: {e}")
-            return 0, 0, 0
-
-    def read_mag_raw(self):
-        """Read raw magnetometer data"""
+            logger.debug(f"Error reading accelerometer: {e}")
+    
+    def _read_magnetometer(self):
+        """Read magnetometer data"""
         try:
             # Read 6 bytes starting from X high register
             data = self.bus.read_i2c_block_data(self.MAG_ADDRESS, self.MAG_OUT_X_H_M, 6)
-
-            # Convert to signed 16-bit values (big endian)
-            x = (data[0] << 8) | data[1]
-            z = (data[2] << 8) | data[3]  # Note: Z comes before Y in LSM303
-            y = (data[4] << 8) | data[5]
-
-            # Convert to signed
-            if x > 32767:
-                x -= 65536
-            if y > 32767:
-                y -= 65536
-            if z > 32767:
-                z -= 65536
-
-            return x, y, z
+            
+            # Convert to signed 16-bit values (magnetometer is big-endian)
+            self.mag_x = self._to_signed_16(data[0] << 8 | data[1])
+            self.mag_z = self._to_signed_16(data[2] << 8 | data[3])  # Z comes before Y
+            self.mag_y = self._to_signed_16(data[4] << 8 | data[5])
+            
+            # Apply calibration
+            self.mag_x = (self.mag_x - self.mag_offset_x) * self.mag_scale_x
+            self.mag_y = (self.mag_y - self.mag_offset_y) * self.mag_scale_y
+            self.mag_z = (self.mag_z - self.mag_offset_z) * self.mag_scale_z
+            
         except Exception as e:
-            logger.error(f"Error reading magnetometer: {e}")
-            return 0, 0, 0
-
-    def update_readings(self):
-        """Update sensor readings"""
-        if not self.available:
-            return
-
+            logger.debug(f"Error reading magnetometer: {e}")
+    
+    def _to_signed_16(self, value):
+        """Convert unsigned 16-bit to signed"""
+        if value > 32767:
+            return value - 65536
+        return value
+    
+    def _calculate_heading(self):
+        """Calculate compass heading with tilt compensation"""
         try:
-            # Read accelerometer
-            accel_x_raw, accel_y_raw, accel_z_raw = self.read_accel_raw()
-
-            # Convert to g (assuming ±2g scale)
-            self.accel_x = accel_x_raw / 16384.0
-            self.accel_y = accel_y_raw / 16384.0
-            self.accel_z = accel_z_raw / 16384.0
-
-            # Read magnetometer
-            mag_x_raw, mag_y_raw, mag_z_raw = self.read_mag_raw()
-
-            # Convert to gauss (assuming ±1.3 gauss scale)
-            self.mag_x = mag_x_raw / 1100.0
-            self.mag_y = mag_y_raw / 1100.0
-            self.mag_z = mag_z_raw / 980.0  # Z axis has different sensitivity
-
-            # Calculate compass heading with tilt compensation
-            self.compass_heading = self._calculate_tilt_compensated_heading()
-
-        except Exception as e:
-            logger.error(f"Error updating GY-511 readings: {e}")
-
-    def _calculate_tilt_compensated_heading(self):
-        """Calculate tilt-compensated compass heading"""
-        try:
-            # Normalize accelerometer readings
-            accel_norm = math.sqrt(self.accel_x ** 2 + self.accel_y ** 2 + self.accel_z ** 2)
-            if accel_norm == 0:
-                return self.compass_heading  # Return previous heading
-
-            ax = self.accel_x / accel_norm
-            ay = self.accel_y / accel_norm
-
-            # Calculate pitch and roll
-            pitch = math.asin(-ax)
-            roll = math.asin(ay / math.cos(pitch))
-
-            # Tilt compensation
-            mag_x_comp = (self.mag_x * math.cos(pitch) +
-                          self.mag_z * math.sin(pitch))
-
-            mag_y_comp = (self.mag_x * math.sin(roll) * math.sin(pitch) +
-                          self.mag_y * math.cos(roll) -
-                          self.mag_z * math.sin(roll) * math.cos(pitch))
-
-            # Calculate heading
-            heading = math.atan2(mag_y_comp, mag_x_comp)
-
-            # Convert to degrees and normalize to 0-360
-            heading_deg = math.degrees(heading)
+            # Simple heading calculation (no tilt compensation)
+            heading_rad = math.atan2(self.mag_y, self.mag_x)
+            heading_deg = math.degrees(heading_rad)
+            
+            # Normalize to 0-360 degrees
             if heading_deg < 0:
                 heading_deg += 360
-
-            return heading_deg
-
+            
+            self.heading = heading_deg
+            
+            # Tilt-compensated heading calculation
+            if self.accel_x != 0 or self.accel_y != 0 or self.accel_z != 0:
+                # Normalize accelerometer readings
+                accel_norm = math.sqrt(self.accel_x**2 + self.accel_y**2 + self.accel_z**2)
+                if accel_norm > 0:
+                    ax_norm = self.accel_x / accel_norm
+                    ay_norm = self.accel_y / accel_norm
+                    az_norm = self.accel_z / accel_norm
+                    
+                    # Calculate roll and pitch
+                    roll = math.atan2(ay_norm, az_norm)
+                    pitch = math.atan2(-ax_norm, math.sqrt(ay_norm**2 + az_norm**2))
+                    
+                    # Tilt compensation
+                    mag_x_comp = (self.mag_x * math.cos(pitch) + 
+                                 self.mag_z * math.sin(pitch))
+                    mag_y_comp = (self.mag_x * math.sin(roll) * math.sin(pitch) + 
+                                 self.mag_y * math.cos(roll) - 
+                                 self.mag_z * math.sin(roll) * math.cos(pitch))
+                    
+                    # Calculate tilt-compensated heading
+                    tilt_heading_rad = math.atan2(mag_y_comp, mag_x_comp)
+                    tilt_heading_deg = math.degrees(tilt_heading_rad)
+                    
+                    # Normalize to 0-360 degrees
+                    if tilt_heading_deg < 0:
+                        tilt_heading_deg += 360
+                    
+                    self.tilt_compensated_heading = tilt_heading_deg
+                else:
+                    self.tilt_compensated_heading = self.heading
+            else:
+                self.tilt_compensated_heading = self.heading
+            
+            # Apply smoothing
+            self.heading_history.append(self.tilt_compensated_heading)
+            
         except Exception as e:
-            logger.error(f"Error calculating heading: {e}")
-            # Fallback to simple 2D compass
-            return self._calculate_simple_heading()
-
-    def _calculate_simple_heading(self):
-        """Calculate simple 2D compass heading (no tilt compensation)"""
-        try:
-            heading = math.atan2(self.mag_y, self.mag_x)
-            heading_deg = math.degrees(heading)
-            if heading_deg < 0:
-                heading_deg += 360
-            return heading_deg
-        except:
-            return 0.0
-
+            logger.debug(f"Error calculating heading: {e}")
+    
     def get_heading(self):
-        """Get compass heading in degrees"""
-        if not self.available:
+        """Get current compass heading (smoothed, tilt-compensated)"""
+        if not self.heading_history:
             return None
-        self.update_readings()
-        return self.compass_heading
-
-    def get_compass_heading(self):
-        """Alternative method name for compatibility"""
-        return self.get_heading()
-
+        
+        # Return smoothed heading
+        return sum(self.heading_history) / len(self.heading_history)
+    
+    def get_raw_heading(self):
+        """Get raw compass heading (no tilt compensation)"""
+        return self.heading if self.last_update > 0 else None
+    
     def get_accelerometer_data(self):
-        """Get accelerometer data in g"""
-        if not self.available:
-            return 0.0, 0.0, 0.0
-        return self.accel_x, self.accel_y, self.accel_z
-
+        """Get accelerometer readings"""
+        return {
+            'x': self.accel_x,
+            'y': self.accel_y,
+            'z': self.accel_z,
+            'timestamp': self.last_update
+        }
+    
     def get_magnetometer_data(self):
-        """Get magnetometer data in gauss"""
-        if not self.available:
-            return 0.0, 0.0, 0.0
-        return self.mag_x, self.mag_y, self.mag_z
-
+        """Get magnetometer readings"""
+        return {
+            'x': self.mag_x,
+            'y': self.mag_y,
+            'z': self.mag_z,
+            'timestamp': self.last_update
+        }
+    
     def calibrate_magnetometer(self, duration=30):
-        """Calibrate magnetometer by rotating device for specified duration"""
-        if not self.available:
-            logger.warning("GY-511 not available for calibration")
-            return False
-
-        logger.info(f"Starting magnetometer calibration - rotate device slowly for {duration} seconds")
-
+        """Calibrate magnetometer by collecting min/max values"""
+        logger.info(f"Starting magnetometer calibration for {duration} seconds...")
+        logger.info("Rotate the device in all directions during calibration")
+        
         min_x = min_y = min_z = float('inf')
         max_x = max_y = max_z = float('-inf')
-
+        
         start_time = time.time()
+        
         while time.time() - start_time < duration:
-            self.update_readings()
-
+            # Update min/max values
             min_x = min(min_x, self.mag_x)
             max_x = max(max_x, self.mag_x)
             min_y = min(min_y, self.mag_y)
             max_y = max(max_y, self.mag_y)
             min_z = min(min_z, self.mag_z)
             max_z = max(max_z, self.mag_z)
-
+            
             time.sleep(0.1)
-
-        # Calculate offsets
+        
+        # Calculate offsets and scales
         self.mag_offset_x = (max_x + min_x) / 2
         self.mag_offset_y = (max_y + min_y) / 2
         self.mag_offset_z = (max_z + min_z) / 2
-
-        logger.info(f"Calibration complete - Offsets: X={self.mag_offset_x:.3f}, "
-                    f"Y={self.mag_offset_y:.3f}, Z={self.mag_offset_z:.3f}")
-
-        return True
-
-    def stop(self):
-        """Stop sensor (for compatibility)"""
-        pass
-
+        
+        range_x = max_x - min_x
+        range_y = max_y - min_y
+        range_z = max_z - min_z
+        
+        avg_range = (range_x + range_y + range_z) / 3
+        
+        self.mag_scale_x = avg_range / range_x if range_x > 0 else 1.0
+        self.mag_scale_y = avg_range / range_y if range_y > 0 else 1.0
+        self.mag_scale_z = avg_range / range_z if range_z > 0 else 1.0
+        
+        logger.info("Magnetometer calibration completed")
+        logger.info(f"Offsets: X={self.mag_offset_x:.2f}, Y={self.mag_offset_y:.2f}, Z={self.mag_offset_z:.2f}")
+        logger.info(f"Scales: X={self.mag_scale_x:.3f}, Y={self.mag_scale_y:.3f}, Z={self.mag_scale_z:.3f}")
+    
+    def is_data_valid(self):
+        """Check if sensor data is valid and recent"""
+        return (self.last_update > 0 and 
+                time.time() - self.last_update < 2.0)  # Data should be less than 2 seconds old
+    
     def cleanup(self):
-        """Cleanup sensor resources"""
-        try:
-            if hasattr(self, 'bus') and self.bus:
+        """Stop sensor and cleanup"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=1.0)
+        
+        if self.bus:
+            try:
                 self.bus.close()
-        except:
-            pass
-        logger.info("GY-511 sensor cleanup completed")
-
+            except:
+                pass
+        
+        logger.info("GY511 sensor cleanup completed")
 
 def main():
     """Test the GY511 sensor"""
     import sys
-
+    
     # Configure logging
     logging.basicConfig(level=logging.INFO)
-
+    
     try:
         # Create sensor instance
         sensor = GY511()
-
+        
         # Initialize sensor
         if not sensor.begin():
             print("Failed to initialize GY511 sensor")
             return 1
-
+        
         print("GY511 sensor initialized successfully")
         print("Press Ctrl+C to stop")
-
+        
         # Check if calibration is requested
         if len(sys.argv) > 1 and sys.argv[1] == 'calibrate':
             sensor.calibrate_magnetometer(30)
-
+        
         # Main reading loop
         try:
             while True:
-                heading = sensor.get_heading()
-                accel_x, accel_y, accel_z = sensor.get_accelerometer_data()
-                mag_x, mag_y, mag_z = sensor.get_magnetometer_data()
-
-                print(f"Heading: {heading:.1f}°")
-                print(f"Accel: X={accel_x:6.3f}g, Y={accel_y:6.3f}g, Z={accel_z:6.3f}g")
-                print(f"Mag:   X={mag_x:6.3f}G, Y={mag_y:6.3f}G, Z={mag_z:6.3f}G")
-                print("-" * 50)
-
+                if sensor.is_data_valid():
+                    heading = sensor.get_heading()
+                    raw_heading = sensor.get_raw_heading()
+                    accel_data = sensor.get_accelerometer_data()
+                    mag_data = sensor.get_magnetometer_data()
+                    
+                    print(f"Heading: {heading:.1f}° (Raw: {raw_heading:.1f}°)")
+                    print(f"Accel: X={accel_data['x']:6d}, Y={accel_data['y']:6d}, Z={accel_data['z']:6d}")
+                    print(f"Mag:   X={mag_data['x']:6.1f}, Y={mag_data['y']:6.1f}, Z={mag_data['z']:6.1f}")
+                    print("-" * 50)
+                else:
+                    print("Waiting for valid sensor data...")
+                
                 time.sleep(1)
-
+                
         except KeyboardInterrupt:
             print("\nStopping sensor...")
-
+        
         # Cleanup
         sensor.cleanup()
-
+        
     except Exception as e:
         print(f"Error: {e}")
         return 1
-
+    
     return 0
-
 
 if __name__ == "__main__":
     exit(main())

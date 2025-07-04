@@ -8,7 +8,7 @@ The boot splash screen displays "Elcano One" on the e-paper display during Raspb
 
 ### 🎨 **Visual Design**
 - **Centered Title**: "Elcano One" prominently displayed
-- **Subtitle**: "GPS Navigation System"
+- **Subtitle**: "GPS Navigation System" 
 - **Decorative Elements**: Professional border and corner decorations
 - **Status Indicator**: "Initializing..." message
 - **E-paper Optimized**: High contrast black and white design
@@ -99,7 +99,7 @@ The splash screen runs as a systemd service with these characteristics:
 The splash screen is configured for the Waveshare 7.5" display:
 
 ```python
-# Display dimensionsg
+# Display dimensions
 width = 800
 height = 480
 
