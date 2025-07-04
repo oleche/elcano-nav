@@ -1002,11 +1002,11 @@ class GPSNavigationSystem:
         self.menu = MenuSystem(self.db, self.sync_manager)
 
         # Initialize buttons
-        self.button_up = Button(2)
-        self.button_down = Button(3)
-        self.button_left = Button(4)
-        self.button_right = Button(17)
-        self.button_center = Button(27)
+        self.button_up = Button(17)
+        self.button_down = Button(4)
+        self.button_left = Button(27)
+        self.button_right = Button(2)
+        self.button_center = Button(3)
 
         # Setup button callbacks
         self.button_up.when_pressed = self.on_button_up
@@ -1076,7 +1076,7 @@ class GPSNavigationSystem:
             return
 
         # Initialize display
-        if not self.display.init():
+        if not self.display.initialize():
             logger.error("Failed to initialize display")
             return
 
@@ -1086,7 +1086,7 @@ class GPSNavigationSystem:
             return
 
         # Start GY-511 sensor
-        if not self.gy511.start():
+        if not self.gy511.begin():
             logger.warning("Failed to start GY-511 sensor - continuing without compass")
 
         # Show initial screen
@@ -1098,13 +1098,13 @@ class GPSNavigationSystem:
 
     def _show_sync_setup_screen(self):
         """Show sync setup configuration screen and wait for button press"""
-        if not self.display.init():
+        if not self.display.initialize():
             logger.error("Failed to initialize display for sync setup")
             return
 
         # Render and display sync setup screen
         setup_image = self.map_renderer.render_sync_setup_screen()
-        self.display.display_image(setup_image)
+        self.display.update(setup_image)
 
         # Wait for any button press
         logger.info("Waiting for button press to retry sync key detection...")
@@ -1147,7 +1147,7 @@ class GPSNavigationSystem:
         """Show waiting for GPS screen"""
         wifi_status = self.wifi.get_status()
         waiting_image = self.map_renderer.render_waiting_screen(wifi_status)
-        self.display.display_image(waiting_image)
+        self.display.update(waiting_image)
 
     def _main_loop(self):
         """Main application loop"""
@@ -1230,7 +1230,7 @@ class GPSNavigationSystem:
             )
 
             # Display the map
-            self.display.display_image(map_image)
+            self.display.update(map_image)
 
             logger.debug(f"Map updated: {lat:.4f}, {lon:.4f}, zoom {self.current_zoom}, "
                          f"heading {heading:.1f}°")
@@ -1242,7 +1242,7 @@ class GPSNavigationSystem:
         """Handle menu mode operations"""
         try:
             menu_image = self.menu.render()
-            self.display.display_image(menu_image)
+            self.display.update(menu_image)
         except Exception as e:
             logger.error(f"Error in menu mode: {e}")
             self.in_menu = False

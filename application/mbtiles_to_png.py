@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+Enhanced MBTiles to PNG Converter with Smart Zoom Fallback
+=========================================================
+Converts MBTiles database tiles to PNG images with intelligent zoom level selection
+and composite map generation for e-paper displays.
+"""
+
 import sqlite3
 import io
 import math
@@ -7,436 +15,413 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class MBTilesReader:
+class MBTiles:
+    """Enhanced MBTiles reader with smart zoom fallback and composite generation"""
+
     def __init__(self, mbtiles_path):
-        """Initialize the MBTiles reader with the path to the MBTiles file."""
+        self.mbtiles_path = mbtiles_path
         self.conn = sqlite3.connect(mbtiles_path)
-        self.cursor = self.conn.cursor()
+        self.conn.row_factory = sqlite3.Row
+
+        # Cache metadata and available zoom levels
+        self._metadata = None
+        self._available_zooms = None
+        self._tile_counts = {}
+
+        logger.info(f"Opened MBTiles database: {mbtiles_path}")
 
     def get_metadata(self):
-        """Get metadata from the MBTiles file."""
-        metadata = {}
-        self.cursor.execute("SELECT name, value FROM metadata")
-        for name, value in self.cursor.fetchall():
-            metadata[name] = value
-        return metadata
+        """Get metadata from MBTiles database"""
+        if self._metadata is None:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT name, value FROM metadata")
+            self._metadata = dict(cursor.fetchall())
+        return self._metadata
 
     def get_available_zoom_levels(self):
-        """Get all available zoom levels in the MBTiles file."""
-        try:
-            self.cursor.execute("SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level")
-            zoom_levels = [row[0] for row in self.cursor.fetchall()]
-            logger.debug(f"Available zoom levels: {zoom_levels}")
-            return zoom_levels
-        except Exception as e:
-            logger.error(f"Error getting zoom levels: {e}")
-            return []
+        """Get all available zoom levels in the database"""
+        if self._available_zooms is None:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level")
+            self._available_zooms = [row[0] for row in cursor.fetchall()]
+            logger.info(f"Available zoom levels: {self._available_zooms}")
+        return self._available_zooms
 
-    def get_best_available_zoom(self, requested_zoom):
-        """Get the best available zoom level for the requested zoom."""
+    def get_tile_count_for_zoom(self, zoom_level):
+        """Get total number of tiles available for a zoom level"""
+        if zoom_level not in self._tile_counts:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM tiles WHERE zoom_level = ?", (zoom_level,))
+            self._tile_counts[zoom_level] = cursor.fetchone()[0]
+        return self._tile_counts[zoom_level]
+
+    def get_tile_count_in_area(self, zoom_level, min_x, min_y, max_x, max_y):
+        """Get number of tiles available in a specific area"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM tiles 
+            WHERE zoom_level = ? AND tile_column >= ? AND tile_column <= ? 
+            AND tile_row >= ? AND tile_row <= ?
+        """, (zoom_level, min_x, max_x, min_y, max_y))
+        return cursor.fetchone()[0]
+
+    def get_best_available_zoom(self, requested_zoom, lat, lon, width_tiles, height_tiles):
+        """
+        Find the best available zoom level for the requested area
+        Prioritizes zoom levels 12 and above, checks tile availability
+        """
         available_zooms = self.get_available_zoom_levels()
+
         if not available_zooms:
-            return requested_zoom
+            logger.warning("No zoom levels available in database")
+            return None
 
-        # If requested zoom is available, use it
-        if requested_zoom in available_zooms:
-            return requested_zoom
+        # Calculate tile bounds for the requested area at different zoom levels
+        def get_tile_bounds(zoom):
+            center_x, center_y = self.deg2num(lat, lon, zoom)
+            half_width = width_tiles / 2
+            half_height = height_tiles / 2
 
-        # Find closest available zoom level
-        closest_zoom = min(available_zooms, key=lambda x: abs(x - requested_zoom))
+            min_x = max(0, int(center_x - half_width))
+            max_x = int(center_x + half_width)
+            min_y = max(0, int(center_y - half_height))
+            max_y = int(center_y + half_height)
 
-        # If the closest zoom is significantly lower than 12, try to find a better one
-        if closest_zoom < 12 and requested_zoom >= 12:
-            higher_zooms = [z for z in available_zooms if z >= 12]
-            if higher_zooms:
-                closest_zoom = min(higher_zooms)
+            return min_x, min_y, max_x, max_y
 
-        logger.info(f"Requested zoom {requested_zoom}, using available zoom {closest_zoom}")
-        return closest_zoom
+        # Score each available zoom level
+        zoom_scores = []
 
-    def get_tile_count_at_zoom(self, zoom, lat, lon, tiles_x, tiles_y):
-        """Count how many tiles are available at a specific zoom level for the given area."""
-        center_x, center_y = self.deg2num(lat, lon, zoom)
-        start_x = int(center_x - tiles_x // 2)
-        start_y = int(center_y - tiles_y // 2)
+        for zoom in available_zooms:
+            try:
+                min_x, min_y, max_x, max_y = get_tile_bounds(zoom)
+                expected_tiles = (max_x - min_x + 1) * (max_y - min_y + 1)
+                available_tiles = self.get_tile_count_in_area(zoom, min_x, min_y, max_x, max_y)
 
-        available_count = 0
-        total_count = tiles_x * tiles_y
+                if expected_tiles == 0:
+                    availability_ratio = 0
+                else:
+                    availability_ratio = available_tiles / expected_tiles
 
-        for ty in range(tiles_y):
-            for tx in range(tiles_x):
-                tile_x = start_x + tx
-                tile_y = start_y + ty
-                if self.get_tile(zoom, tile_x, tile_y):
-                    available_count += 1
+                # Calculate score based on multiple factors
+                score = 0
 
-        return available_count, total_count
+                # Prefer zoom levels 12 and above
+                if zoom >= 12:
+                    score += 100
+                elif zoom >= 10:
+                    score += 50
+                else:
+                    score += 10
+
+                # Heavily weight tile availability
+                score += availability_ratio * 200
+
+                # Prefer zoom levels close to requested
+                zoom_diff = abs(zoom - requested_zoom)
+                score -= zoom_diff * 10
+
+                # Bonus for exact match
+                if zoom == requested_zoom:
+                    score += 50
+
+                zoom_scores.append((zoom, score, availability_ratio, available_tiles, expected_tiles))
+
+                logger.debug(f"Zoom {zoom}: score={score:.1f}, availability={availability_ratio:.2%}, "
+                             f"tiles={available_tiles}/{expected_tiles}")
+
+            except Exception as e:
+                logger.warning(f"Error evaluating zoom level {zoom}: {e}")
+                continue
+
+        if not zoom_scores:
+            logger.warning("No suitable zoom levels found")
+            return None
+
+        # Sort by score (highest first)
+        zoom_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Return the best zoom level, but only if it has reasonable availability
+        best_zoom, best_score, best_availability, available_tiles, expected_tiles = zoom_scores[0]
+
+        # Require at least 10% tile availability, unless it's the only option
+        if best_availability < 0.1 and len(zoom_scores) > 1:
+            logger.warning(f"Best zoom {best_zoom} has low availability ({best_availability:.1%}), "
+                           f"trying alternatives")
+
+            # Try to find a zoom with better availability
+            for zoom, score, availability, avail_tiles, exp_tiles in zoom_scores[1:]:
+                if availability >= 0.1:
+                    logger.info(f"Using zoom {zoom} instead (availability: {availability:.1%})")
+                    return zoom, availability, avail_tiles, exp_tiles
+
+        logger.info(f"Selected zoom level {best_zoom} (availability: {best_availability:.1%}, "
+                    f"tiles: {available_tiles}/{expected_tiles})")
+
+        return best_zoom, best_availability, available_tiles, expected_tiles
 
     def deg2num(self, lat_deg, lon_deg, zoom):
-        """Convert latitude, longitude to tile coordinates."""
+        """Convert latitude/longitude to tile numbers"""
         lat_rad = math.radians(lat_deg)
         n = 2.0 ** zoom
-        xtile = int((lon_deg + 180.0) / 360.0 * n)
-        ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
-        return (xtile, ytile)
+        x = (lon_deg + 180.0) / 360.0 * n
+        y = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
+        return x, y
+
+    def num2deg(self, x, y, zoom):
+        """Convert tile numbers to latitude/longitude"""
+        n = 2.0 ** zoom
+        lon_deg = x / n * 360.0 - 180.0
+        lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / n)))
+        lat_deg = math.degrees(lat_rad)
+        return lat_deg, lon_deg
 
     def get_tile(self, zoom, x, y):
-        """Get a tile from the MBTiles file."""
-        # In MBTiles, the y coordinate is flipped from TMS to XYZ
-        y_flipped = (2 ** zoom - 1) - y
+        """Get a single tile from the database"""
+        cursor = self.conn.cursor()
 
-        self.cursor.execute(
-            "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
-            (zoom, x, y_flipped)
-        )
-        result = self.cursor.fetchone()
+        # MBTiles uses TMS (Tile Map Service) coordinate system
+        # Convert from XYZ to TMS
+        tms_y = (2 ** zoom - 1) - y
 
-        if result:
-            return result[0]
+        cursor.execute("""
+            SELECT tile_data FROM tiles 
+            WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?
+        """, (zoom, x, tms_y))
+
+        row = cursor.fetchone()
+        if row:
+            return row[0]
         return None
 
-    def get_tile_as_png(self, zoom, x, y):
-        """Get a tile as a PNG image."""
-        tile_data = self.get_tile(zoom, x, y)
-        if tile_data:
-            # Convert the tile data to a PIL Image
-            img = Image.open(io.BytesIO(tile_data))
+    def create_placeholder_tile(self, size=256):
+        """Create a placeholder tile for missing tiles"""
+        image = Image.new('RGB', (size, size), color='#f0f0f0')
+        draw = ImageDraw.Draw(image)
 
-            # Convert to PNG if it's not already
-            if img.format != 'PNG':
-                output = io.BytesIO()
-                img.save(output, format='PNG')
-                return output.getvalue()
-            return tile_data
-        return None
+        # Draw a subtle grid pattern
+        grid_spacing = size // 8
+        for i in range(0, size, grid_spacing):
+            draw.line([(i, 0), (i, size)], fill='#e0e0e0', width=1)
+            draw.line([(0, i), (size, i)], fill='#e0e0e0', width=1)
 
-    def get_png_from_coordinates(self, lat, lon, zoom):
-        """Get a PNG tile from geographic coordinates."""
-        x, y = self.deg2num(lat, lon, zoom)
-        return self.get_tile_as_png(zoom, x, y), x, y
-
-    def save_png_from_coordinates(self, lat, lon, zoom, output_path):
-        """Save a PNG tile from geographic coordinates to a file."""
-        png_data, x, y = self.get_png_from_coordinates(lat, lon, zoom)
-        if png_data:
-            with open(output_path, 'wb') as f:
-                f.write(png_data)
-            return True, x, y
-        return False, x, y
-
-    def get_bounds(self):
-        """Get the bounds of the MBTiles file."""
+        # Add "No Data" text in center
         try:
-            self.cursor.execute("SELECT value FROM metadata WHERE name='bounds'")
-            result = self.cursor.fetchone()
-            if result:
-                # Bounds format: "minlon,minlat,maxlon,maxlat"
-                bounds_str = result[0]
-                bounds = [float(x) for x in bounds_str.split(',')]
-                return {
-                    'min_lon': bounds[0],
-                    'min_lat': bounds[1],
-                    'max_lon': bounds[2],
-                    'max_lat': bounds[3]
-                }
-        except Exception as e:
-            logger.warning(f"Could not get bounds from metadata: {e}")
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+        except:
+            font = ImageFont.load_default()
 
-        # Fallback: calculate bounds from available tiles
+        text = "No Data"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        text_x = (size - text_width) // 2
+        text_y = (size - text_height) // 2
+
+        draw.text((text_x, text_y), text, fill='#999999', font=font)
+
+        # Convert to bytes
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG')
+        return buffer.getvalue()
+
+    def generate_composite_image(self, lat, lon, zoom, width, height,
+                                 use_fallback=True, crop_to_size=True):
+        """
+        Generate a composite image centered on the given coordinates
+        with enhanced zoom fallback and tile availability checking
+        """
         try:
-            self.cursor.execute("""
-                SELECT MIN(tile_column), MIN(tile_row), MAX(tile_column), MAX(tile_row), zoom_level
-                FROM tiles 
-                GROUP BY zoom_level 
-                ORDER BY zoom_level DESC 
-                LIMIT 1
-            """)
-            result = self.cursor.fetchone()
-            if result:
-                min_x, min_y, max_x, max_y, zoom = result
-
-                # Convert tile coordinates to lat/lon
-                min_lon, max_lat = self.num2deg(min_x, min_y, zoom)
-                max_lon, min_lat = self.num2deg(max_x + 1, max_y + 1, zoom)
-
-                return {
-                    'min_lon': min_lon,
-                    'min_lat': min_lat,
-                    'max_lon': max_lon,
-                    'max_lat': max_lat
-                }
-        except Exception as e:
-            logger.warning(f"Could not calculate bounds from tiles: {e}")
-
-        return None
-
-    def num2deg(self, xtile, ytile, zoom):
-        """Convert tile coordinates to latitude, longitude."""
-        n = 2.0 ** zoom
-        lon_deg = xtile / n * 360.0 - 180.0
-        lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
-        lat_deg = math.degrees(lat_rad)
-        return (lon_deg, lat_deg)
-
-    def contains_coordinates(self, lat, lon):
-        """Check if the MBTiles file contains the given coordinates."""
-        bounds = self.get_bounds()
-        if not bounds:
-            return False
-
-        return (bounds['min_lat'] <= lat <= bounds['max_lat'] and
-                bounds['min_lon'] <= lon <= bounds['max_lon'])
-
-    def get_file_info(self):
-        """Get information about the MBTiles file."""
-        metadata = self.get_metadata()
-        bounds = self.get_bounds()
-
-        return {
-            'name': metadata.get('name', 'Unknown'),
-            'description': metadata.get('description', ''),
-            'version': metadata.get('version', ''),
-            'bounds': bounds,
-            'format': metadata.get('format', 'png'),
-            'minzoom': int(metadata.get('minzoom', 0)),
-            'maxzoom': int(metadata.get('maxzoom', 18)),
-            'available_zooms': self.get_available_zoom_levels()
-        }
-
-    def close(self):
-        """Close the database connection."""
-        self.conn.close()
-
-    def generate_composite_image(self, lat, lon, zoom, width=800, height=480, use_fallback=True, crop_to_size=True):
-        """Generate a composite image for the given coordinates and dimensions with smart zoom fallback"""
-        try:
-            # Calculate how many tiles we need to cover the requested dimensions
+            # Calculate how many tiles we need
             tile_size = 256
             tiles_x = math.ceil(width / tile_size) + 1
             tiles_y = math.ceil(height / tile_size) + 1
 
-            # Find the best zoom level to use
-            original_zoom = zoom
-            best_zoom = self.get_best_available_zoom(zoom)
+            # Find the best available zoom level
+            zoom_result = self.get_best_available_zoom(zoom, lat, lon, tiles_x, tiles_y)
 
-            # If we're using a different zoom, check tile availability
-            if best_zoom != zoom:
-                available_count, total_count = self.get_tile_count_at_zoom(best_zoom, lat, lon, tiles_x, tiles_y)
-                availability_ratio = available_count / total_count if total_count > 0 else 0
+            if zoom_result is None:
+                raise Exception("No suitable zoom level found")
 
-                logger.info(
-                    f"Zoom {best_zoom}: {available_count}/{total_count} tiles available ({availability_ratio:.1%})")
+            actual_zoom, availability_ratio, available_tiles, expected_tiles = zoom_result
+            zoom_adjusted = actual_zoom != zoom
 
-                # If availability is very low and we have other zoom options, try them
-                if availability_ratio < 0.3:
-                    available_zooms = self.get_available_zoom_levels()
-                    for test_zoom in sorted(available_zooms, key=lambda x: abs(x - zoom)):
-                        if test_zoom == best_zoom:
-                            continue
-                        test_available, test_total = self.get_tile_count_at_zoom(test_zoom, lat, lon, tiles_x, tiles_y)
-                        test_ratio = test_available / test_total if test_total > 0 else 0
+            # Calculate center tile coordinates
+            center_x, center_y = self.deg2num(lat, lon, actual_zoom)
 
-                        logger.debug(
-                            f"Testing zoom {test_zoom}: {test_available}/{test_total} tiles ({test_ratio:.1%})")
+            # Calculate tile bounds
+            half_tiles_x = tiles_x // 2
+            half_tiles_y = tiles_y // 2
 
-                        if test_ratio > availability_ratio and test_ratio > 0.5:
-                            logger.info(f"Switching to zoom {test_zoom} with better availability ({test_ratio:.1%})")
-                            best_zoom = test_zoom
-                            availability_ratio = test_ratio
-                            break
+            start_x = int(center_x - half_tiles_x)
+            end_x = int(center_x + half_tiles_x)
+            start_y = int(center_y - half_tiles_y)
+            end_y = int(center_y + half_tiles_y)
 
-            # Calculate the center tile coordinates for the chosen zoom
-            center_x, center_y = self.deg2num(lat, lon, best_zoom)
-
-            # Calculate the starting tile coordinates
-            start_x = int(center_x - tiles_x // 2)
-            start_y = int(center_y - tiles_y // 2)
-
-            # Create a larger image to hold all tiles
-            composite_width = tiles_x * tile_size
-            composite_height = tiles_y * tile_size
-            composite_image = Image.new('RGB', (composite_width, composite_height), (255, 255, 255))
+            # Create composite image
+            composite_width = (end_x - start_x + 1) * tile_size
+            composite_height = (end_y - start_y + 1) * tile_size
+            composite = Image.new('RGB', (composite_width, composite_height), color='white')
 
             tiles_found = 0
             tiles_missing = 0
 
             # Fetch and place tiles
-            for ty in range(tiles_y):
-                for tx in range(tiles_x):
-                    tile_x = start_x + tx
-                    tile_y = start_y + ty
+            for tile_y in range(start_y, end_y + 1):
+                for tile_x in range(start_x, end_x + 1):
+                    try:
+                        tile_data = self.get_tile(actual_zoom, tile_x, tile_y)
 
-                    # Get tile data
-                    tile_data = self.get_tile_as_png(best_zoom, tile_x, tile_y)
-
-                    if tile_data:
-                        try:
-                            # Load tile image
+                        if tile_data:
                             tile_image = Image.open(io.BytesIO(tile_data))
-
-                            # Resize tile if we're using a different zoom level
-                            if best_zoom != original_zoom:
-                                zoom_diff = original_zoom - best_zoom
-                                if zoom_diff > 0:
-                                    # Zooming in - crop and scale up
-                                    scale_factor = 2 ** zoom_diff
-                                    new_size = int(tile_size * scale_factor)
-                                    tile_image = tile_image.resize((new_size, new_size), Image.LANCZOS)
-                                    # Crop to tile_size
-                                    crop_offset = (new_size - tile_size) // 2
-                                    tile_image = tile_image.crop((crop_offset, crop_offset,
-                                                                  crop_offset + tile_size, crop_offset + tile_size))
-                                elif zoom_diff < 0:
-                                    # Zooming out - scale down
-                                    scale_factor = 2 ** abs(zoom_diff)
-                                    new_size = tile_size // scale_factor
-                                    tile_image = tile_image.resize((new_size, new_size), Image.LANCZOS)
-                                    # Center on a tile_size canvas
-                                    centered_tile = Image.new('RGB', (tile_size, tile_size), (240, 240, 240))
-                                    offset = (tile_size - new_size) // 2
-                                    centered_tile.paste(tile_image, (offset, offset))
-                                    tile_image = centered_tile
-
-                            # Paste tile into composite
-                            paste_x = tx * tile_size
-                            paste_y = ty * tile_size
-                            composite_image.paste(tile_image, (paste_x, paste_y))
                             tiles_found += 1
-
-                        except Exception as e:
-                            logger.warning(f"Error loading tile {tile_x},{tile_y}: {e}")
+                        else:
+                            # Create placeholder tile
+                            placeholder_data = self.create_placeholder_tile()
+                            tile_image = Image.open(io.BytesIO(placeholder_data))
                             tiles_missing += 1
-                            if use_fallback:
-                                self._add_fallback_tile(composite_image, tx * tile_size, ty * tile_size, tile_size)
-                    else:
-                        tiles_missing += 1
 
-                        # Add fallback tile if requested
-                        if use_fallback:
-                            self._add_fallback_tile(composite_image, tx * tile_size, ty * tile_size, tile_size)
+                        # Calculate position in composite
+                        pos_x = (tile_x - start_x) * tile_size
+                        pos_y = (tile_y - start_y) * tile_size
+
+                        # Handle zoom level differences by scaling
+                        if zoom_adjusted and tile_data:  # Only scale actual tiles, not placeholders
+                            scale_factor = 2 ** (actual_zoom - zoom)
+                            if scale_factor != 1:
+                                new_size = int(tile_size * scale_factor)
+                                tile_image = tile_image.resize((new_size, new_size), Image.Resampling.LANCZOS)
+
+                                # Crop to tile_size if scaled up
+                                if scale_factor > 1:
+                                    crop_x = (new_size - tile_size) // 2
+                                    crop_y = (new_size - tile_size) // 2
+                                    tile_image = tile_image.crop((crop_x, crop_y,
+                                                                  crop_x + tile_size,
+                                                                  crop_y + tile_size))
+
+                        composite.paste(tile_image, (pos_x, pos_y))
+
+                    except Exception as e:
+                        logger.debug(f"Error processing tile {tile_x},{tile_y}: {e}")
+                        tiles_missing += 1
+                        continue
 
             # Crop to requested size if needed
-            if crop_to_size:
+            if crop_to_size and (composite.width != width or composite.height != height):
                 # Calculate crop area to center the image
-                crop_x = max(0, (composite_width - width) // 2)
-                crop_y = max(0, (composite_height - height) // 2)
+                crop_x = max(0, (composite.width - width) // 2)
+                crop_y = max(0, (composite.height - height) // 2)
 
-                # Ensure we don't crop beyond image bounds
-                crop_x2 = min(composite_width, crop_x + width)
-                crop_y2 = min(composite_height, crop_y + height)
+                composite = composite.crop((
+                    crop_x, crop_y,
+                    min(crop_x + width, composite.width),
+                    min(crop_y + height, composite.height)
+                ))
 
-                composite_image = composite_image.crop((crop_x, crop_y, crop_x2, crop_y2))
-
-                # If the cropped image is smaller than requested, pad it
-                if composite_image.size != (width, height):
-                    padded_image = Image.new('RGB', (width, height), (255, 255, 255))
-                    paste_x = (width - composite_image.width) // 2
-                    paste_y = (height - composite_image.height) // 2
-                    padded_image.paste(composite_image, (paste_x, paste_y))
-                    composite_image = padded_image
+                # If cropped image is smaller than requested, paste onto white background
+                if composite.width < width or composite.height < height:
+                    final_image = Image.new('RGB', (width, height), color='white')
+                    paste_x = (width - composite.width) // 2
+                    paste_y = (height - composite.height) // 2
+                    final_image.paste(composite, (paste_x, paste_y))
+                    composite = final_image
 
             # Convert to bytes
-            output = io.BytesIO()
-            composite_image.save(output, format='PNG')
-            image_data = output.getvalue()
+            output_buffer = io.BytesIO()
+            composite.save(output_buffer, format='PNG')
+            image_data = output_buffer.getvalue()
 
-            # Metadata
+            # Prepare metadata
             metadata = {
+                'requested_zoom': zoom,
+                'actual_zoom': actual_zoom,
+                'zoom_adjusted': zoom_adjusted,
                 'tiles_found': tiles_found,
                 'tiles_missing': tiles_missing,
-                'center_tile_x': center_x,
-                'center_tile_y': center_y,
-                'requested_zoom': original_zoom,
-                'actual_zoom': best_zoom,
-                'zoom_adjusted': best_zoom != original_zoom,
-                'composite_size': (composite_image.width, composite_image.height),
-                'availability_ratio': tiles_found / (tiles_found + tiles_missing) if (
-                                                                                                 tiles_found + tiles_missing) > 0 else 0
+                'availability_ratio': availability_ratio,
+                'center_lat': lat,
+                'center_lon': lon,
+                'image_width': composite.width,
+                'image_height': composite.height
             }
 
-            logger.info(f"Generated composite: {tiles_found} tiles found, {tiles_missing} missing, "
-                        f"zoom {original_zoom}→{best_zoom}, size {composite_image.size}")
+            logger.info(f"Generated composite image: {composite.width}x{composite.height}, "
+                        f"zoom {actual_zoom} ({'adjusted' if zoom_adjusted else 'requested'}), "
+                        f"tiles {tiles_found}/{tiles_found + tiles_missing} "
+                        f"({availability_ratio:.1%} available)")
 
             return image_data, metadata
 
         except Exception as e:
             logger.error(f"Error generating composite image: {e}")
-            # Return a blank image with error info
-            blank_image = Image.new('RGB', (width, height), (255, 255, 255))
+            raise
 
-            # Add error message to the blank image
-            try:
-                draw = ImageDraw.Draw(blank_image)
-                font = ImageFont.load_default()
-                error_text = f"Map Error: {str(e)[:50]}"
-                bbox = draw.textbbox((0, 0), error_text, font=font)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1]
-                text_x = (width - text_width) // 2
-                text_y = (height - text_height) // 2
-                draw.text((text_x, text_y), error_text, fill=(128, 128, 128), font=font)
-            except:
-                pass
-
-            output = io.BytesIO()
-            blank_image.save(output, format='PNG')
-
-            metadata = {
-                'error': str(e),
-                'tiles_found': 0,
-                'tiles_missing': 0,
-                'requested_zoom': zoom,
-                'actual_zoom': zoom,
-                'zoom_adjusted': False
-            }
-
-            return output.getvalue(), metadata
-
-    def _add_fallback_tile(self, composite_image, x, y, size):
-        """Add a fallback tile when original tile is missing"""
-        # Create a simple fallback tile
-        fallback = Image.new('RGB', (size, size), (240, 240, 240))
-        draw = ImageDraw.Draw(fallback)
-
-        # Draw a simple grid pattern
-        grid_spacing = size // 4
-        for i in range(0, size, grid_spacing):
-            draw.line([i, 0, i, size], fill=(200, 200, 200), width=1)
-            draw.line([0, i, size, i], fill=(200, 200, 200), width=1)
-
-        # Add "No Tile" text
-        try:
-            font = ImageFont.load_default()
-            text = "No Tile"
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            text_x = (size - text_width) // 2
-            text_y = (size - text_height) // 2
-            draw.text((text_x, text_y), text, fill=(128, 128, 128), font=font)
-        except:
-            pass
-
-        # Paste fallback tile into composite
-        composite_image.paste(fallback, (x, y))
+    def close(self):
+        """Close the database connection"""
+        if self.conn:
+            self.conn.close()
+            logger.info(f"Closed MBTiles database: {self.mbtiles_path}")
 
 
-# Example usage
+def main():
+    """Command line interface for testing"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='MBTiles to PNG converter with smart zoom fallback')
+    parser.add_argument('mbtiles_file', help='Path to MBTiles file')
+    parser.add_argument('--lat', type=float, required=True, help='Latitude')
+    parser.add_argument('--lon', type=float, required=True, help='Longitude')
+    parser.add_argument('--zoom', type=int, default=14, help='Zoom level (default: 14)')
+    parser.add_argument('--width', type=int, default=800, help='Image width (default: 800)')
+    parser.add_argument('--height', type=int, default=480, help='Image height (default: 480)')
+    parser.add_argument('--output', default='output.png', help='Output PNG file (default: output.png)')
+    parser.add_argument('--info', action='store_true', help='Show database info')
+
+    args = parser.parse_args()
+
+    # Setup logging
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+    try:
+        # Open MBTiles database
+        mbtiles = MBTiles(args.mbtiles_file)
+
+        if args.info:
+            # Show database information
+            metadata = mbtiles.get_metadata()
+            print("Database Metadata:")
+            for key, value in metadata.items():
+                print(f"  {key}: {value}")
+
+            zoom_levels = mbtiles.get_available_zoom_levels()
+            print(f"\nAvailable zoom levels: {zoom_levels}")
+
+            for zoom in zoom_levels:
+                count = mbtiles.get_tile_count_for_zoom(zoom)
+                print(f"  Zoom {zoom}: {count} tiles")
+
+        # Generate composite image
+        print(f"Generating composite image for {args.lat}, {args.lon} at zoom {args.zoom}")
+        image_data, metadata = mbtiles.generate_composite_image(
+            args.lat, args.lon, args.zoom, args.width, args.height
+        )
+
+        # Save to file
+        with open(args.output, 'wb') as f:
+            f.write(image_data)
+
+        print(f"Saved composite image to {args.output}")
+        print(f"Metadata: {metadata}")
+
+        mbtiles.close()
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+    return 0
+
+
 if __name__ == "__main__":
-    # This is a demo - you would need an actual MBTiles file
-    # For demonstration, we'll just print the steps
-
-    print("MBTiles to PNG Converter")
-    print("------------------------")
-    print("In a real application, you would:")
-    print("1. Initialize the reader with an MBTiles file path")
-    print("2. Specify coordinates and zoom level")
-    print("3. Get or save the PNG tile")
-
-    print("\nExample code:")
-    print("reader = MBTilesReader('path/to/map.mbtiles')")
-    print("lat, lon = 37.7749, -122.4194  # San Francisco")
-    print("zoom = 12")
-    print("success, x, y = reader.save_png_from_coordinates(lat, lon, zoom, 'sf_tile.png')")
-    print("print(f'Saved tile at coordinates ({x}, {y}) to sf_tile.png')")
-    print("reader.close()")
+    exit(main())
